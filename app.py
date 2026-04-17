@@ -482,11 +482,16 @@ def render_ncs_achievement(result_text: str, mode: str) -> None:
 
 with st.sidebar:
     st.header("설정")
-    api_key = st.text_input("API 키 입력", type="password")
-    mode = st.radio("운영 모드 선택", ["학습 모드", "평가 모드"], index=0)
-    if api_key:
-        st.success("API 키가 입력되었습니다.")
+    secret_api_key = st.secrets.get("GEMINI_API_KEY", "")
+    manual_api_key = ""
+    if secret_api_key:
+        api_key = secret_api_key
+        st.success("Streamlit Secrets에서 API 키를 불러왔습니다.")
     else:
+        manual_api_key = st.text_input("API 키 입력 (로컬 테스트용)", type="password")
+        api_key = manual_api_key.strip()
+    mode = st.radio("운영 모드 선택", ["학습 모드", "평가 모드"], index=0)
+    if not api_key:
         st.info("Gemini API 키를 입력해 주세요.")
     st.markdown("#### 반영 NCS 능력단위")
     for unit in NCS_UNITS:
@@ -523,7 +528,7 @@ with tab_input:
         if genai is None:
             st.error("Gemini 라이브러리가 설치되지 않았습니다. `pip install google-genai` 후 다시 실행해 주세요.")
         elif not api_key:
-            st.warning("사이드바에 Gemini API 키를 먼저 입력해 주세요.")
+            st.warning("Gemini API 키를 먼저 설정해 주세요. (배포: Streamlit Secrets / 로컬: 사이드바 입력)")
         elif not symptom_text.strip() and uploaded_image is None:
             st.warning("고장 증상 또는 부품 사진 중 하나 이상을 입력해 주세요.")
         elif mode == "평가 모드" and not student_reasoning.strip():
