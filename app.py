@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -88,6 +89,7 @@ GEMINI_MODEL_CANDIDATES = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
 ]
+GEMINI_RETRY_DELAYS_SECONDS = [1.5, 3.0, 5.0]
 
 
 st.set_page_config(
@@ -201,25 +203,44 @@ def ask_gemini(
 
     contents = [types.Content(role="user", parts=parts)]
     last_error = None
+    unavailable_error_seen = False
     for model_name in GEMINI_MODEL_CANDIDATES:
-        try:
-            response = client.models.generate_content(model=model_name, contents=contents)
-            return response.text if response and response.text else "응답을 받지 못했습니다. 다시 시도해 주세요."
-        except TimeoutError as exc:
-            raise RuntimeError(
-                "Gemini 응답 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 잠시 후 다시 시도해 주세요."
-            ) from exc
-        except Exception as exc:
-            last_error = exc
-            error_text = str(exc).lower()
-            if "timeout" in error_text or "timed out" in error_text or "deadline" in error_text:
+        for retry_idx in range(len(GEMINI_RETRY_DELAYS_SECONDS) + 1):
+            try:
+                response = client.models.generate_content(model=model_name, contents=contents)
+                return response.text if response and response.text else "응답을 받지 못했습니다. 다시 시도해 주세요."
+            except TimeoutError as exc:
                 raise RuntimeError(
-                    "Gemini API 호출 중 타임아웃이 발생했습니다. 입력을 간단히 하거나 잠시 후 다시 시도해 주세요."
+                    "Gemini 응답 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 잠시 후 다시 시도해 주세요."
                 ) from exc
-            # 모델 미지원/미존재(404)일 때만 다음 후보 모델을 시도한다.
-            if "404" in error_text or "not_found" in error_text or "is not found" in error_text:
-                continue
-            raise RuntimeError(f"Gemini API 호출 중 오류가 발생했습니다: {exc}") from exc
+            except Exception as exc:
+                last_error = exc
+                error_text = str(exc).lower()
+                if "timeout" in error_text or "timed out" in error_text or "deadline" in error_text:
+                    raise RuntimeError(
+                        "Gemini API 호출 중 타임아웃이 발생했습니다. 입력을 간단히 하거나 잠시 후 다시 시도해 주세요."
+                    ) from exc
+
+                # 모델 미지원/미존재(404)일 때는 다음 후보 모델을 시도한다.
+                if "404" in error_text or "not_found" in error_text or "is not found" in error_text:
+                    break
+
+                # 일시 과부하(503/UNAVAILABLE)는 잠시 대기 후 재시도한다.
+                if "503" in error_text or "unavailable" in error_text:
+                    unavailable_error_seen = True
+                    if retry_idx < len(GEMINI_RETRY_DELAYS_SECONDS):
+                        time.sleep(GEMINI_RETRY_DELAYS_SECONDS[retry_idx])
+                        continue
+                    # 현재 모델 재시도 횟수를 소진하면 다음 후보 모델로 넘어간다.
+                    break
+
+                raise RuntimeError(f"Gemini API 호출 중 오류가 발생했습니다: {exc}") from exc
+
+    if unavailable_error_seen:
+        raise RuntimeError(
+            "Gemini 서버가 일시적으로 혼잡합니다(503). 잠시 후 다시 시도해 주세요. "
+            "문제가 반복되면 입력을 조금 줄이거나 다른 시간대에 재시도해 주세요."
+        )
 
     raise RuntimeError(
         "현재 계정에서 사용 가능한 Gemini 모델을 찾지 못했습니다. "
