@@ -82,7 +82,12 @@ MODE_RUBRIC_WEIGHTS = {
 }
 
 # Gemini 모델명은 여기서 한 번에 관리한다.
-GEMINI_MODEL_NAME = "gemini-2.0-flash-exp"
+# 배포 환경/계정별로 지원 모델이 다를 수 있어 후보를 순차 시도한다.
+GEMINI_MODEL_CANDIDATES = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
 
 
 st.set_page_config(
@@ -195,21 +200,32 @@ def ask_gemini(
             parts.append(types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type))
 
     contents = [types.Content(role="user", parts=parts)]
-    try:
-        response = client.models.generate_content(model=GEMINI_MODEL_NAME, contents=contents)
-    except TimeoutError as exc:
-        raise RuntimeError(
-            "Gemini 응답 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 잠시 후 다시 시도해 주세요."
-        ) from exc
-    except Exception as exc:
-        error_text = str(exc).lower()
-        if "timeout" in error_text or "timed out" in error_text or "deadline" in error_text:
+    last_error = None
+    for model_name in GEMINI_MODEL_CANDIDATES:
+        try:
+            response = client.models.generate_content(model=model_name, contents=contents)
+            return response.text if response and response.text else "응답을 받지 못했습니다. 다시 시도해 주세요."
+        except TimeoutError as exc:
             raise RuntimeError(
-                "Gemini API 호출 중 타임아웃이 발생했습니다. 입력을 간단히 하거나 잠시 후 다시 시도해 주세요."
+                "Gemini 응답 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 잠시 후 다시 시도해 주세요."
             ) from exc
-        raise RuntimeError(f"Gemini API 호출 중 오류가 발생했습니다: {exc}") from exc
+        except Exception as exc:
+            last_error = exc
+            error_text = str(exc).lower()
+            if "timeout" in error_text or "timed out" in error_text or "deadline" in error_text:
+                raise RuntimeError(
+                    "Gemini API 호출 중 타임아웃이 발생했습니다. 입력을 간단히 하거나 잠시 후 다시 시도해 주세요."
+                ) from exc
+            # 모델 미지원/미존재(404)일 때만 다음 후보 모델을 시도한다.
+            if "404" in error_text or "not_found" in error_text or "is not found" in error_text:
+                continue
+            raise RuntimeError(f"Gemini API 호출 중 오류가 발생했습니다: {exc}") from exc
 
-    return response.text if response and response.text else "응답을 받지 못했습니다. 다시 시도해 주세요."
+    raise RuntimeError(
+        "현재 계정에서 사용 가능한 Gemini 모델을 찾지 못했습니다. "
+        "Google AI Studio에서 지원 모델명을 확인한 뒤 상단 GEMINI_MODEL_CANDIDATES를 수정해 주세요. "
+        f"(마지막 오류: {last_error})"
+    )
 
 
 def split_sections(result_text: str) -> dict:
