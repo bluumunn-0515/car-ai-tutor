@@ -81,6 +81,9 @@ MODE_RUBRIC_WEIGHTS = {
     },
 }
 
+# Gemini 모델명은 여기서 한 번에 관리한다.
+GEMINI_MODEL_NAME = "gemini-2.0-flash-exp"
+
 
 st.set_page_config(
     page_title="자동차 전기전자제어 학습지원 시스템",
@@ -193,7 +196,7 @@ def ask_gemini(
 
     contents = [types.Content(role="user", parts=parts)]
     try:
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=contents)
+        response = client.models.generate_content(model=GEMINI_MODEL_NAME, contents=contents)
     except TimeoutError as exc:
         raise RuntimeError(
             "Gemini 응답 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 잠시 후 다시 시도해 주세요."
