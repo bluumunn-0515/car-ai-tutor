@@ -358,11 +358,15 @@ def build_pdf_bytes(
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    font_path = Path("C:/Windows/Fonts/malgun.ttf")
-    if font_path.exists():
-        pdf.add_font("Malgun", "", str(font_path))
-        pdf.set_font("Malgun", size=12)
-    else:
+    font_path = Path(__file__).resolve().parent / "malgun.ttf"
+    try:
+        if font_path.exists():
+            pdf.add_font("Malgun", "", str(font_path))
+            pdf.set_font("Malgun", size=12)
+        else:
+            pdf.set_font("Helvetica", size=12)
+    except Exception:
+        # 배포 환경에서 폰트 등록이 실패해도 PDF 생성은 계속 진행한다.
         pdf.set_font("Helvetica", size=12)
 
     pdf.multi_cell(0, 8, "자동차 전기전자제어 진단 결과 리포트")
