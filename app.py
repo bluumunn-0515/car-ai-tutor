@@ -104,6 +104,25 @@ def reset_teacher_session_soft() -> None:
     """역할 전환 등으로 교사 로그인 상태만 해제한다."""
     st.session_state.teacher_logged_in = False
     st.session_state.teacher_display_name = ""
+
+
+def normalize_student_name(s: str) -> str:
+    return " ".join((s or "").strip().split())
+
+
+def reset_student_auth_form() -> None:
+    """학생 로그인/가입 단계 입력만 초기화한다 (student_db·로그인 유지)."""
+    st.session_state.student_auth_stage = "idle"
+    st.session_state.student_pending_id = ""
+    st.session_state.student_pending_name = ""
+
+
+def reset_student_session_soft() -> None:
+    """학생 로그아웃·역할 전환 시 로그인 상태 및 임시 입력을 해제한다. (student_db는 유지)"""
+    st.session_state.student_logged_in = False
+    reset_student_auth_form()
+    st.session_state.student_id = ""
+    st.session_state.student_display_name = ""
 def _rubric_lines_for_unit(unit: str) -> str:
     lines = NCS_RUBRIC.get(unit, [])
     if not lines:
@@ -729,25 +748,118 @@ def render_teacher_mode() -> None:
         st.rerun()
 
 
+def complete_student_login(student_no: str, name: str) -> None:
+    """가입/로그인 성공 후 세션에 반영한다."""
+    reset_student_auth_form()
+    st.session_state.student_logged_in = True
+    st.session_state.student_id = student_no
+    st.session_state.student_display_name = name
+    st.rerun()
+
+
+def render_student_login() -> None:
+    """학생 모드: 학번 기준 신규 가입 또는 기존 로그인."""
+    st.markdown("## 학생 로그인 / 회원가입")
+    st.caption("이름과 학번을 입력한 뒤 안내에 따라 비밀번호를 설정하거나 입력해 주세요.")
+    st.caption(
+        "※ 학생 정보(이름·학번·비밀번호)는 `st.session_state.student_db`에만 저장되며, "
+        "브라우저 새로고침 또는 서버 재시작 시 초기화됩니다. (추후 DB 연동 예정)"
+    )
+    db: dict = st.session_state.student_db
+    stage = st.session_state.get("student_auth_stage", "idle")
+
+    if stage == "idle":
+        with st.form("student_step_id_name"):
+            name_in = st.text_input("이름", placeholder="홍길동", key="stu_login_name")
+            sid_in = st.text_input("학번", placeholder="숫자만 입력 (예: 20250101)", key="stu_login_sid")
+            next_clicked = st.form_submit_button("다음", type="primary")
+        if next_clicked:
+            raw_sid = (sid_in or "").strip()
+            nm = normalize_student_name(name_in or "")
+            if not nm:
+                st.error("이름을 입력해 주세요.")
+            elif not raw_sid:
+                st.error("학번을 입력해 주세요.")
+            elif not raw_sid.isdigit():
+                st.error("학번은 숫자만 입력할 수 있습니다. 문자는 사용할 수 없습니다.")
+            else:
+                sid = raw_sid
+                if sid not in db:
+                    st.session_state.student_auth_stage = "register"
+                    st.session_state.student_pending_id = sid
+                    st.session_state.student_pending_name = nm
+                    st.rerun()
+                else:
+                    stored_name = normalize_student_name(db[sid].get("name", ""))
+                    if stored_name != nm:
+                        st.warning(
+                            "입력하신 이름이 이 학번으로 등록된 정보와 다릅니다. "
+                            "본인 학번·이름과 동일하게 입력했는지 확인해 주세요."
+                        )
+                    else:
+                        st.session_state.student_auth_stage = "login"
+                        st.session_state.student_pending_id = sid
+                        st.session_state.student_pending_name = db[sid]["name"]
+                        st.rerun()
+
+    elif stage == "register":
+        pid = st.session_state.get("student_pending_id") or ""
+        pname = st.session_state.get("student_pending_name") or ""
+        st.success("첫 접속을 환영합니다! 사용할 비밀번호를 설정해 주세요.")
+        st.info(f"**이름:** {pname} · **학번:** {pid}")
+        with st.form("student_register_pw"):
+            pw1 = st.text_input("비밀번호", type="password", key="stu_reg_pw1")
+            pw2 = st.text_input("비밀번호 확인", type="password", key="stu_reg_pw2")
+            reg_submit = st.form_submit_button("비밀번호 설정 및 시작", type="primary")
+        if reg_submit:
+            if not (pw1 or "").strip():
+                st.error("비밀번호를 입력해 주세요.")
+            elif pw1 != pw2:
+                st.error("비밀번호가 서로 일치하지 않습니다.")
+            else:
+                db[pid] = {"name": pname, "password": pw1.strip()}
+                complete_student_login(pid, pname)
+        if st.button("처음부터 다시 입력", key="stu_back_from_register"):
+            reset_student_auth_form()
+            st.rerun()
+
+    elif stage == "login":
+        pid = st.session_state.get("student_pending_id") or ""
+        pname = st.session_state.get("student_pending_name") or ""
+        st.info(f"학번 **{pid}** ({pname})으로 로그인합니다. 비밀번호를 입력해 주세요.")
+        with st.form("student_login_pw"):
+            pw_in = st.text_input("비밀번호", type="password", key="stu_login_pw_only")
+            login_submit = st.form_submit_button("로그인", type="primary")
+        if login_submit:
+            rec = db.get(pid)
+            if not rec:
+                st.error("등록 정보를 찾을 수 없습니다. 처음부터 다시 시도해 주세요.")
+            elif pw_in != rec.get("password"):
+                st.error("비밀번호가 올바르지 않습니다. 다시 확인해 주세요.")
+            else:
+                complete_student_login(pid, rec.get("name") or pname)
+        if st.button("처음부터 다시 입력", key="stu_back_from_login"):
+            reset_student_auth_form()
+            st.rerun()
+
+
 def render_student_mode() -> None:
+    sname = (st.session_state.get("student_display_name") or "").strip() or "학생"
+    st.success(f"안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
     st.header("학생 학습 경로")
     st.caption("교과·단원을 고른 뒤 AI 튜터와 실습하고, 포트폴리오 PDF로 정리할 수 있습니다.")
     with st.sidebar:
         st.header("학생 설정")
+        st.caption(
+            f"로그인: **{st.session_state.get('student_display_name') or '-'}** · 학번 `{st.session_state.get('student_id') or '-'}`"
+        )
+        st.caption("※ 새로고침·서버 재시작 시 로그인 및 등록 정보가 초기화될 수 있습니다.")
         secret_api_key = st.secrets.get("GEMINI_API_KEY", "")
         if secret_api_key:
             api_key = secret_api_key
             st.success("Streamlit Secrets에서 API 키를 불러왔습니다.")
         else:
             api_key = st.text_input("API 키 입력 (로컬 테스트용)", type="password").strip()
-        st.session_state.student_id = st.text_input(
-            "학생 ID 또는 이름",
-            value=st.session_state.get("student_id") or "학생001",
-        )
-        st.session_state.student_display_name = st.text_input(
-            "표시 이름 (선택)",
-            value=st.session_state.get("student_display_name") or st.session_state.student_id,
-        )
         mode = st.radio("운영 모드 선택", ["학습 모드", "평가 모드"], index=0)
         if not api_key:
             st.info("Gemini API 키를 입력해 주세요.")
@@ -905,8 +1017,8 @@ def init_session_state() -> None:
         "latest_generated_at": "",
         "latest_subject": "",
         "latest_unit": "",
-        "student_id": "학생001",
-        "student_display_name": "학생001",
+        "student_id": "",
+        "student_display_name": "",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -922,6 +1034,16 @@ def init_session_state() -> None:
         st.session_state.teacher_logged_in = False
     if "teacher_display_name" not in st.session_state:
         st.session_state.teacher_display_name = ""
+    if "student_db" not in st.session_state:
+        st.session_state.student_db = {}
+    if "student_logged_in" not in st.session_state:
+        st.session_state.student_logged_in = False
+    if "student_auth_stage" not in st.session_state:
+        st.session_state.student_auth_stage = "idle"
+    if "student_pending_id" not in st.session_state:
+        st.session_state.student_pending_id = ""
+    if "student_pending_name" not in st.session_state:
+        st.session_state.student_pending_name = ""
 
 
 def _consume_role_query_param() -> None:
@@ -941,10 +1063,12 @@ def _consume_role_query_param() -> None:
     if val == "teacher":
         st.session_state.app_role = "teacher"
         reset_teacher_session_soft()
+        reset_student_session_soft()
         st.rerun()
     elif val == "student":
         st.session_state.app_role = "student"
         reset_teacher_session_soft()
+        reset_student_session_soft()
         st.rerun()
 
 
@@ -1082,11 +1206,13 @@ def render_role_selection() -> None:
         if st.button("교사 모드로 진입", key="landing_btn_teacher", use_container_width=True):
             st.session_state.app_role = "teacher"
             reset_teacher_session_soft()
+            reset_student_session_soft()
             st.rerun()
     with bc2:
         if st.button("학생 모드로 진입", key="landing_btn_student", use_container_width=True):
             st.session_state.app_role = "student"
             reset_teacher_session_soft()
+            reset_student_session_soft()
             st.rerun()
 
 
@@ -1106,9 +1232,17 @@ with st.sidebar:
     if st.button("역할 다시 선택"):
         st.session_state.app_role = None
         reset_teacher_session_soft()
+        reset_student_session_soft()
         st.rerun()
     if st.session_state.app_role == "teacher" and st.session_state.get("teacher_logged_in"):
         render_teacher_password_sidebar()
+    if st.session_state.app_role == "student" and st.session_state.get("student_logged_in"):
+        st.markdown("---")
+        st.markdown("#### 학생 계정")
+        st.caption(f"**{st.session_state.get('student_display_name') or '-'}** · 학번 `{st.session_state.get('student_id') or '-'}`")
+        if st.button("로그아웃 (다른 학생으로 로그인)", key="student_logout_btn"):
+            reset_student_session_soft()
+            st.rerun()
 if st.session_state.app_role == "teacher":
     if not st.session_state.get("teacher_logged_in"):
         st.title("자동차 전기전자제어 — 교사 모드")
@@ -1117,6 +1251,10 @@ if st.session_state.app_role == "teacher":
     st.title("자동차 전기전자제어 — 교사 모드")
     render_teacher_mode()
 else:
+    if not st.session_state.get("student_logged_in"):
+        st.title("자동차 전기전자제어 — 학생 모드")
+        render_student_login()
+        st.stop()
     st.title("자동차 전기전자제어 — 학생 모드")
     render_student_mode()
 st.markdown("---")
