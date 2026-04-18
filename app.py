@@ -851,28 +851,40 @@ def render_role_selection() -> None:
     _consume_role_query_param()
 
     landing_html = """
-<div class="landing-wrap" style="text-align: center; max-width: 960px; margin: 0 auto; padding: 2.5rem 1.25rem 3rem; font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;">
+<div class="landing-wrap" style="text-align: center; max-width: 960px; margin: 0 auto; padding: 2.5rem 1.25rem 3rem; font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #f1f5f9; border-radius: 20px;">
 <style>
+  .landing-wrap .landing-hero {
+    background: linear-gradient(145deg, #bbf7d0 0%, #86efac 35%, #4ade80 70%, #22c55e 100%);
+    border-radius: 18px;
+    padding: 2rem 1.5rem 2.15rem;
+    margin: 0 0 1.85rem 0;
+    box-shadow: 0 8px 28px rgba(34, 197, 94, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+  }
   .landing-wrap .landing-title {
-    font-size: clamp(1.85rem, 4.5vw, 2.85rem);
+    font-size: clamp(2.15rem, 5.2vw, 3.25rem);
     font-weight: 800;
     letter-spacing: -0.02em;
-    line-height: 1.2;
-    margin: 0 0 0.65rem 0;
-    color: #0f172a;
+    line-height: 1.18;
+    margin: 0;
+    color: #ffffff;
+    text-shadow: 0 2px 8px rgba(21, 83, 45, 0.35), 0 1px 2px rgba(0, 0, 0, 0.2);
   }
   .landing-wrap .landing-sub {
-    font-size: clamp(1.05rem, 2.2vw, 1.25rem);
-    font-weight: 500;
-    color: #475569;
-    margin: 0 0 0.35rem 0;
-    letter-spacing: 0.02em;
+    font-size: clamp(1.25rem, 2.8vw, 1.55rem);
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0.85rem 0 0 0;
+    letter-spacing: 0.03em;
+    line-height: 1.45;
+    text-shadow: 0 1px 6px rgba(21, 83, 45, 0.3), 0 1px 2px rgba(0, 0, 0, 0.15);
   }
   .landing-wrap .landing-hint {
-    font-size: 0.9rem;
-    color: #64748b;
+    font-size: 1rem;
+    color: #334155;
     margin: 0 0 2.25rem 0;
-    line-height: 1.55;
+    line-height: 1.65;
+    font-weight: 500;
   }
   .landing-wrap .mode-cards {
     display: flex;
@@ -933,13 +945,16 @@ def render_role_selection() -> None:
   }
   .landing-wrap .landing-foot {
     margin-top: 2.75rem;
-    font-size: 0.82rem;
-    color: #94a3b8;
-    line-height: 1.5;
+    font-size: 0.88rem;
+    color: #64748b;
+    line-height: 1.55;
+    font-weight: 500;
   }
 </style>
-  <h1 class="landing-title">자동차 고장진단 AI tutor</h1>
-  <p class="landing-sub">자동차 전기전자 제어</p>
+  <div class="landing-hero">
+    <h1 class="landing-title">자동차 고장진단 AI tutor</h1>
+    <p class="landing-sub">자동차 전기전자 제어</p>
+  </div>
   <p class="landing-hint">역할을 선택하면 해당 화면으로 이동합니다. 세션 동안 유지되며,<br/>이후 사이드바에서 언제든 역할을 바꿀 수 있습니다.</p>
   <div class="mode-cards">
     <a class="mode-card mode-card-teacher" href="?role=teacher" target="_self">
@@ -958,7 +973,7 @@ def render_role_selection() -> None:
 
     st.markdown(
         '<div style="text-align:center; margin-top:1.25rem;">'
-        '<p style="color:#94a3b8;font-size:0.8rem;margin:0;">카드 링크가 차단된 경우 아래 버튼으로 진입할 수 있습니다.</p></div>',
+        '<p style="color:#475569;font-size:0.92rem;margin:0;font-weight:500;">카드 링크가 차단된 경우 아래 버튼으로 진입할 수 있습니다.</p></div>',
         unsafe_allow_html=True,
     )
     _sp, bc1, bc2, _sp2 = st.columns([1.2, 1, 1, 1.2])
