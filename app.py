@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 import streamlit as st
+
+import sheets_backend as shb
 try:
     from google import genai
     from google.genai import types
@@ -111,14 +113,14 @@ def normalize_student_name(s: str) -> str:
 
 
 def reset_student_auth_form() -> None:
-    """학생 로그인/가입 단계 입력만 초기화한다 (student_db·로그인 유지)."""
+    """학생 로그인/가입 단계 입력만 초기화한다."""
     st.session_state.student_auth_stage = "idle"
     st.session_state.student_pending_id = ""
     st.session_state.student_pending_name = ""
 
 
 def reset_student_session_soft() -> None:
-    """학생 로그아웃·역할 전환 시 로그인 상태 및 임시 입력을 해제한다. (student_db는 유지)"""
+    """학생 로그아웃·역할 전환 시 로그인 상태 및 임시 입력을 해제한다."""
     st.session_state.student_logged_in = False
     reset_student_auth_form()
     st.session_state.student_id = ""
@@ -509,42 +511,38 @@ def render_ncs_achievement(result_text: str, mode: str) -> None:
         st.markdown(summary)
     with st.expander("NCS 기반 분석 원문 보기"):
         st.write(result_text)
+def gs_app_sheets_ready() -> bool:
+    """Secrets + 연결 가능 여부 (st_gsheets_connection + 서비스 계정)."""
+    if not shb.gsheets_available():
+        return False
+    try:
+        _ = st.secrets["connections"]["gsheets"]
+    except Exception:
+        return False
+    try:
+        shb.get_gsheets_connection()
+        return True
+    except Exception:
+        return False
+
+
 def get_diagnostic_records() -> list[dict]:
-    return st.session_state.diagnostic_records
+    """history 시트 기준 진단 기록 (세션 캐시 TTL 내 재사용)."""
+    if not gs_app_sheets_ready():
+        return []
+    try:
+        return shb.history_df_to_records(shb.read_history_df())
+    except Exception as exc:
+        st.session_state["_gsheets_read_error"] = str(exc)
+        return []
+
+
 def append_diagnostic_record(record: dict) -> None:
-    st.session_state.diagnostic_records.append(record)
-    st.session_state.diagnosis_history = [
-        {
-            "mode": r["mode"],
-            "symptom": r["symptom"],
-            "reasoning": r["reasoning"],
-            "result": r["result"],
-        }
-        for r in st.session_state.diagnostic_records
-    ]
-def migrate_legacy_history_if_needed() -> None:
-    if st.session_state.diagnostic_records:
-        return
-    legacy = st.session_state.get("diagnosis_history") or []
-    if not legacy:
-        return
-    for item in legacy:
-        st.session_state.diagnostic_records.append(
-            {
-                "record_id": str(uuid.uuid4()),
-                "submitted_at": st.session_state.get("latest_generated_at") or "",
-                "student_id": "legacy",
-                "student_display_name": "이관 데이터",
-                "subject": "자동차 전기전자제어",
-                "unit": NCS_UNITS[0],
-                "mode": item.get("mode", "학습 모드"),
-                "symptom": item.get("symptom", ""),
-                "reasoning": item.get("reasoning", ""),
-                "result": item.get("result", ""),
-                "teacher_feedback": "",
-                "teacher_feedback_updated_at": "",
-            }
-        )
+    """진단 완료 시 history 시트에 append."""
+    if not gs_app_sheets_ready():
+        raise RuntimeError("Google Sheets에 연결할 수 없습니다. secrets.toml [connections.gsheets] 를 확인하세요.")
+    ncs = calculate_ncs_scores(record.get("result") or "", record.get("mode") or "학습 모드")["overall_rate"]
+    shb.append_history_from_record(record, ncs)
 def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], list[float]]:
     if not records:
         return [], []
@@ -625,6 +623,21 @@ def render_teacher_mode() -> None:
     st.success(f"{tname} 선생님, 환영합니다!")
     st.header("교사 대시보드")
     st.caption("제출된 진단 기록을 한눈에 보고, 성취도를 분석하며 피드백을 남길 수 있습니다.")
+    if not gs_app_sheets_ready():
+        st.error(
+            "Google Sheets에 연결할 수 없습니다. `pip install st-gsheets-connection` 후 "
+            "`.streamlit/secrets.toml`의 `[connections.gsheets]`(spreadsheet URL + 서비스 계정)을 설정하고, "
+            "스프레드시트를 서비스 계정 이메일과 공유했는지 확인하세요."
+        )
+        return
+    prev_err = st.session_state.pop("_gsheets_read_error", None)
+    if prev_err:
+        st.warning(f"이전 시트 읽기 오류: {prev_err}")
+    c_ref, _ = st.columns([1, 4])
+    with c_ref:
+        if st.button("시트 새로고침", help="캐시를 비우고 history를 다시 읽습니다.", key="teacher_gs_refresh"):
+            shb.invalidate_all_sheet_caches()
+            st.rerun()
     records = get_diagnostic_records()
     st.subheader("학생 실황 — 진단 제출 현황")
     if not records:
@@ -715,12 +728,15 @@ def render_teacher_mode() -> None:
             )
             if st.button("피드백 저장", type="primary"):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                for r in st.session_state.diagnostic_records:
-                    if r["record_id"] == current["record_id"]:
-                        r["teacher_feedback"] = feedback_text.strip()
-                        r["teacher_feedback_updated_at"] = now
-                        break
-                st.success("피드백이 기록에 저장되었습니다.")
+                try:
+                    shb.update_teacher_feedback_in_sheet(
+                        str(current["record_id"]),
+                        feedback_text.strip(),
+                        now,
+                    )
+                    st.success("피드백이 Google Sheets에 저장되었습니다.")
+                except Exception as exc:
+                    st.error(f"시트 저장 실패: {exc}")
                 st.rerun()
             if (current.get("teacher_feedback") or "").strip():
                 st.caption(f"마지막 저장: {current.get('teacher_feedback_updated_at') or '-'}")
@@ -742,9 +758,11 @@ def render_teacher_mode() -> None:
     )
     st.markdown("---")
     if records and st.button("모든 진단 기록 초기화 (데모용)"):
-        st.session_state.diagnostic_records = []
-        st.session_state.diagnosis_history = []
-        st.session_state.latest_result = ""
+        try:
+            shb.clear_history_worksheet()
+            st.success("history 시트를 비웠습니다.")
+        except Exception as exc:
+            st.error(f"시트 초기화 실패: {exc}")
         st.rerun()
 
 
@@ -758,14 +776,20 @@ def complete_student_login(student_no: str, name: str) -> None:
 
 
 def render_student_login() -> None:
-    """학생 모드: 학번 기준 신규 가입 또는 기존 로그인."""
+    """학생 모드: users 시트 기준 신규 가입 또는 기존 로그인."""
     st.markdown("## 학생 로그인 / 회원가입")
     st.caption("이름과 학번을 입력한 뒤 안내에 따라 비밀번호를 설정하거나 입력해 주세요.")
     st.caption(
-        "※ 학생 정보(이름·학번·비밀번호)는 `st.session_state.student_db`에만 저장되며, "
-        "브라우저 새로고침 또는 서버 재시작 시 초기화됩니다. (추후 DB 연동 예정)"
+        "※ 학생 계정은 **Google Sheets `users` 탭**에 저장됩니다. 비밀번호는 **해시**만 저장되며 시트에 평문으로 남지 않습니다."
     )
-    db: dict = st.session_state.student_db
+    if not gs_app_sheets_ready():
+        st.error(
+            "Google Sheets에 연결할 수 없습니다. `pip install st-gsheets-connection` 후 "
+            "`.streamlit/secrets.toml`의 `[connections.gsheets]`를 설정하고, "
+            "스프레드시트에 `users` / `history` 워크시트를 만들어 주세요."
+        )
+        return
+
     stage = st.session_state.get("student_auth_stage", "idle")
 
     if stage == "idle":
@@ -784,13 +808,18 @@ def render_student_login() -> None:
                 st.error("학번은 숫자만 입력할 수 있습니다. 문자는 사용할 수 없습니다.")
             else:
                 sid = raw_sid
-                if sid not in db:
+                try:
+                    row = shb.get_user_row(sid)
+                except Exception as exc:
+                    st.error(f"시트를 읽는 중 오류가 발생했습니다: {exc}")
+                    return
+                if row is None:
                     st.session_state.student_auth_stage = "register"
                     st.session_state.student_pending_id = sid
                     st.session_state.student_pending_name = nm
                     st.rerun()
                 else:
-                    stored_name = normalize_student_name(db[sid].get("name", ""))
+                    stored_name = normalize_student_name(row.get("name", ""))
                     if stored_name != nm:
                         st.warning(
                             "입력하신 이름이 이 학번으로 등록된 정보와 다릅니다. "
@@ -799,7 +828,7 @@ def render_student_login() -> None:
                     else:
                         st.session_state.student_auth_stage = "login"
                         st.session_state.student_pending_id = sid
-                        st.session_state.student_pending_name = db[sid]["name"]
+                        st.session_state.student_pending_name = row.get("name") or nm
                         st.rerun()
 
     elif stage == "register":
@@ -817,8 +846,14 @@ def render_student_login() -> None:
             elif pw1 != pw2:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
             else:
-                db[pid] = {"name": pname, "password": pw1.strip()}
-                complete_student_login(pid, pname)
+                try:
+                    if shb.get_user_row(pid) is not None:
+                        st.error("이미 등록된 학번입니다. 처음부터 다시 시도해 주세요.")
+                    else:
+                        shb.append_user_row(pid, pname, pw1.strip())
+                        complete_student_login(pid, pname)
+                except Exception as exc:
+                    st.error(f"회원 등록 저장 실패: {exc}")
         if st.button("처음부터 다시 입력", key="stu_back_from_register"):
             reset_student_auth_form()
             st.rerun()
@@ -831,12 +866,20 @@ def render_student_login() -> None:
             pw_in = st.text_input("비밀번호", type="password", key="stu_login_pw_only")
             login_submit = st.form_submit_button("로그인", type="primary")
         if login_submit:
-            rec = db.get(pid)
+            try:
+                rec = shb.get_user_row(pid)
+            except Exception as exc:
+                st.error(f"시트를 읽는 중 오류가 발생했습니다: {exc}")
+                rec = None
             if not rec:
                 st.error("등록 정보를 찾을 수 없습니다. 처음부터 다시 시도해 주세요.")
-            elif pw_in != rec.get("password"):
+            elif not shb.verify_student_password(pid, pw_in or "", rec.get("password_hash") or ""):
                 st.error("비밀번호가 올바르지 않습니다. 다시 확인해 주세요.")
             else:
+                try:
+                    shb.maybe_upgrade_plaintext_password(pid, pw_in or "", rec.get("password_hash") or "")
+                except Exception:
+                    pass
                 complete_student_login(pid, rec.get("name") or pname)
         if st.button("처음부터 다시 입력", key="stu_back_from_login"):
             reset_student_auth_form()
@@ -853,7 +896,7 @@ def render_student_mode() -> None:
         st.caption(
             f"로그인: **{st.session_state.get('student_display_name') or '-'}** · 학번 `{st.session_state.get('student_id') or '-'}`"
         )
-        st.caption("※ 새로고침·서버 재시작 시 로그인 및 등록 정보가 초기화될 수 있습니다.")
+        st.caption("※ 브라우저 세션만 초기화됩니다. 학생 계정·진단 이력은 Google Sheets에 저장됩니다.")
         secret_api_key = st.secrets.get("GEMINI_API_KEY", "")
         if secret_api_key:
             api_key = secret_api_key
@@ -940,8 +983,14 @@ def render_student_mode() -> None:
                             "teacher_feedback": "",
                             "teacher_feedback_updated_at": "",
                         }
-                        append_diagnostic_record(record)
-                        st.success("AI 피드백이 생성되었습니다. [AI 피드백] 탭에서 확인해 보세요.")
+                        try:
+                            append_diagnostic_record(record)
+                            shb.invalidate_all_sheet_caches()
+                            st.success(
+                                "AI 피드백이 생성되었고 history 시트에 저장되었습니다. [AI 피드백] 탭에서 확인해 보세요."
+                            )
+                        except Exception as sheet_exc:
+                            st.warning(f"AI 피드백은 생성되었으나 Google Sheets 저장에 실패했습니다: {sheet_exc}")
                     except Exception as exc:
                         st.error(f"진단 요청 중 오류가 발생했습니다: {exc}")
     with tab_feedback:
@@ -1010,7 +1059,6 @@ def render_student_mode() -> None:
 def init_session_state() -> None:
     defaults = {
         "app_role": None,
-        "diagnostic_records": [],
         "latest_result": "",
         "latest_mode": "학습 모드",
         "latest_symptom": "",
@@ -1023,9 +1071,6 @@ def init_session_state() -> None:
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
-    if "diagnosis_history" not in st.session_state:
-        st.session_state.diagnosis_history = []
-    migrate_legacy_history_if_needed()
     if "teacher_password" not in st.session_state:
         st.session_state.teacher_password = TEACHER_PASSWORD_DEFAULT
     if "teacher_login_logs" not in st.session_state:
@@ -1034,8 +1079,6 @@ def init_session_state() -> None:
         st.session_state.teacher_logged_in = False
     if "teacher_display_name" not in st.session_state:
         st.session_state.teacher_display_name = ""
-    if "student_db" not in st.session_state:
-        st.session_state.student_db = {}
     if "student_logged_in" not in st.session_state:
         st.session_state.student_logged_in = False
     if "student_auth_stage" not in st.session_state:
