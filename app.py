@@ -804,6 +804,8 @@ def render_student_mode() -> None:
                 render_feedback_cards(item["result"], item["mode"])
     else:
         st.caption("이 계정으로 저장된 진단 이력이 없습니다.")
+
+
 def init_session_state() -> None:
     defaults = {
         "app_role": None,
@@ -823,20 +825,155 @@ def init_session_state() -> None:
     if "diagnosis_history" not in st.session_state:
         st.session_state.diagnosis_history = []
     migrate_legacy_history_if_needed()
-def render_role_selection() -> None:
-    st.title("자동차 전기전자제어 학습지원 시스템")
-    st.caption("역할을 선택한 뒤 해당 모드로 진입합니다.")
-    choice = st.radio(
-        "역할 선택",
-        ["교사 모드", "학생 모드"],
-        horizontal=True,
-        help="선택은 세션 동안 유지되며, 사이드바에서 언제든 변경할 수 있습니다.",
-    )
-    if st.button("선택한 역할로 시작", type="primary"):
-        st.session_state.app_role = "teacher" if choice.startswith("교사") else "student"
+def _consume_role_query_param() -> None:
+    """랜딩 페이지의 카드 링크(?role=)로 진입 시 역할을 반영한다."""
+    qp = st.query_params
+    if "role" not in qp:
+        return
+    raw = qp.get("role")
+    val = raw[0] if isinstance(raw, list) else raw
+    try:
+        del st.query_params["role"]
+    except Exception:
+        try:
+            qp.pop("role", None)
+        except Exception:
+            pass
+    if val == "teacher":
+        st.session_state.app_role = "teacher"
         st.rerun()
+    elif val == "student":
+        st.session_state.app_role = "student"
+        st.rerun()
+
+
+def render_role_selection() -> None:
+    _consume_role_query_param()
+
+    landing_html = """
+<div class="landing-wrap" style="text-align: center; max-width: 960px; margin: 0 auto; padding: 2.5rem 1.25rem 3rem; font-family: 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;">
+<style>
+  .landing-wrap .landing-title {
+    font-size: clamp(1.85rem, 4.5vw, 2.85rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin: 0 0 0.65rem 0;
+    color: #0f172a;
+  }
+  .landing-wrap .landing-sub {
+    font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+    font-weight: 500;
+    color: #475569;
+    margin: 0 0 0.35rem 0;
+    letter-spacing: 0.02em;
+  }
+  .landing-wrap .landing-hint {
+    font-size: 0.9rem;
+    color: #64748b;
+    margin: 0 0 2.25rem 0;
+    line-height: 1.55;
+  }
+  .landing-wrap .mode-cards {
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 1.75rem;
+    margin: 0 auto;
+  }
+  .landing-wrap .mode-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: min(100%, 340px);
+    min-height: 200px;
+    padding: 1.65rem 1.5rem;
+    border-radius: 18px;
+    text-decoration: none;
+    text-align: center;
+    box-sizing: border-box;
+    transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+    border: 2px solid transparent;
+  }
+  .landing-wrap .mode-card:hover {
+    transform: scale(1.045);
+    box-shadow: 0 14px 32px rgba(15, 23, 42, 0.14);
+    filter: brightness(1.03);
+  }
+  .landing-wrap .mode-card:active {
+    transform: scale(1.01);
+  }
+  .landing-wrap .mode-card-teacher {
+    background: linear-gradient(160deg, #fffde7 0%, #fff59d 40%, #fdd835 100%);
+    border-color: #f9a825;
+    color: #3e2723;
+  }
+  .landing-wrap .mode-card-teacher:hover {
+    background: linear-gradient(160deg, #fff9c4 0%, #ffee58 35%, #ffca28 100%);
+  }
+  .landing-wrap .mode-card-student {
+    background: linear-gradient(160deg, #e3f2fd 0%, #90caf9 45%, #42a5f5 100%);
+    border-color: #1565c0;
+    color: #0d47a1;
+  }
+  .landing-wrap .mode-card-student:hover {
+    background: linear-gradient(160deg, #e1f5fe 0%, #81d4fa 40%, #29b6f6 100%);
+  }
+  .landing-wrap .mode-card-label {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+  .landing-wrap .mode-card-desc {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    opacity: 0.95;
+  }
+  .landing-wrap .landing-foot {
+    margin-top: 2.75rem;
+    font-size: 0.82rem;
+    color: #94a3b8;
+    line-height: 1.5;
+  }
+</style>
+  <h1 class="landing-title">자동차 고장진단 AI tutor</h1>
+  <p class="landing-sub">자동차 전기전자 제어</p>
+  <p class="landing-hint">역할을 선택하면 해당 화면으로 이동합니다. 세션 동안 유지되며,<br/>이후 사이드바에서 언제든 역할을 바꿀 수 있습니다.</p>
+  <div class="mode-cards">
+    <a class="mode-card mode-card-teacher" href="?role=teacher" target="_self">
+      <span class="mode-card-label">교사 모드</span>
+      <span class="mode-card-desc">선생님용: 학습 현황 관리</span>
+    </a>
+    <a class="mode-card mode-card-student" href="?role=student" target="_self">
+      <span class="mode-card-label">학생 모드</span>
+      <span class="mode-card-desc">학생용: 고장진단 실습 시작</span>
+    </a>
+  </div>
+  <p class="landing-foot">NCS 수행준거 기반 · 소크라테스식 AI 학습 지원</p>
+</div>
+"""
+    st.markdown(landing_html, unsafe_allow_html=True)
+
+    st.markdown(
+        '<div style="text-align:center; margin-top:1.25rem;">'
+        '<p style="color:#94a3b8;font-size:0.8rem;margin:0;">카드 링크가 차단된 경우 아래 버튼으로 진입할 수 있습니다.</p></div>',
+        unsafe_allow_html=True,
+    )
+    _sp, bc1, bc2, _sp2 = st.columns([1.2, 1, 1, 1.2])
+    with bc1:
+        if st.button("교사 모드로 진입", key="landing_btn_teacher", use_container_width=True):
+            st.session_state.app_role = "teacher"
+            st.rerun()
+    with bc2:
+        if st.button("학생 모드로 진입", key="landing_btn_student", use_container_width=True):
+            st.session_state.app_role = "student"
+            st.rerun()
+
+
 st.set_page_config(
-    page_title="자동차 전기전자제어 학습지원 시스템",
+    page_title="자동차 고장진단 AI tutor",
     page_icon="🚗",
     layout="wide",
 )
