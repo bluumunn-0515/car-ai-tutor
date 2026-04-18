@@ -1,7 +1,7 @@
 import re
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 import streamlit as st
@@ -84,6 +84,26 @@ GEMINI_MODEL_CANDIDATES = [
     "gemini-1.5-flash",
 ]
 GEMINI_RETRY_DELAYS_SECONDS = [1.5, 3.0, 5.0]
+
+# --- 교사 인증(세션 전용; DB 미연동 시 재시작·새로고침 시 초기화) ---
+TEACHER_PASSWORD_DEFAULT = "0000"
+
+
+def now_kst_display() -> str:
+    """접속 로그용 한국 표준시 문자열."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.now(ZoneInfo("Asia/Seoul"))
+    except Exception:
+        dt = datetime.now(timezone.utc) + timedelta(hours=9)
+    return dt.strftime("%Y-%m-%d %H:%M:%S") + " KST"
+
+
+def reset_teacher_session_soft() -> None:
+    """역할 전환 등으로 교사 로그인 상태만 해제한다."""
+    st.session_state.teacher_logged_in = False
+    st.session_state.teacher_display_name = ""
 def _rubric_lines_for_unit(unit: str) -> str:
     lines = NCS_RUBRIC.get(unit, [])
     if not lines:
@@ -530,7 +550,60 @@ def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], l
         radar_labels.append(short)
         radar_values.append(round(sums[unit] / c, 1))
     return radar_labels, radar_values
+
+
+def render_teacher_login() -> None:
+    """교사 모드 선택 직후: 성함·비밀번호 검증 후 대시보드 진입."""
+    st.markdown("## 교사 로그인")
+    st.caption("교사 대시보드는 성함과 비밀번호 확인 후에만 이용할 수 있습니다.")
+    st.caption(
+        "※ 비밀번호·접속 기록은 브라우저 세션에만 저장됩니다. "
+        "페이지를 새로고침하거나 서버가 재시작되면 비밀번호는 초기값(0000)으로 돌아갑니다. (추후 DB 연동 예정)"
+    )
+    with st.form("teacher_login_form", clear_on_submit=False):
+        name_in = st.text_input("성함", placeholder="홍길동", key="teacher_login_name")
+        pw_in = st.text_input("비밀번호", type="password", key="teacher_login_pw")
+        submitted = st.form_submit_button("로그인", type="primary")
+    if submitted:
+        if not (name_in or "").strip():
+            st.error("성함을 입력해 주세요.")
+        elif pw_in != st.session_state.teacher_password:
+            st.error("비밀번호가 올바르지 않습니다. 다시 확인해 주세요.")
+        else:
+            st.session_state.teacher_logged_in = True
+            st.session_state.teacher_display_name = (name_in or "").strip()
+            st.session_state.teacher_login_logs.append(
+                {
+                    "teacher_name": st.session_state.teacher_display_name,
+                    "logged_in_at_kst": now_kst_display(),
+                }
+            )
+            st.rerun()
+
+
+def render_teacher_password_sidebar() -> None:
+    """로그인한 교사만: 사이드바에서 비밀번호 변경."""
+    st.markdown("---")
+    st.markdown("#### 교사 비밀번호 변경")
+    st.caption("저장 후 다음 로그인부터 새 비밀번호가 적용됩니다.")
+    with st.form("teacher_pw_change_form"):
+        new_pw = st.text_input("새 비밀번호", type="password", key="teacher_pw_new")
+        new_pw2 = st.text_input("새 비밀번호 확인", type="password", key="teacher_pw_new2")
+        change_submitted = st.form_submit_button("비밀번호 저장")
+    if change_submitted:
+        if not (new_pw or "").strip():
+            st.error("새 비밀번호를 입력해 주세요.")
+        elif new_pw != new_pw2:
+            st.error("새 비밀번호가 서로 일치하지 않습니다.")
+        else:
+            st.session_state.teacher_password = new_pw.strip()
+            st.success("비밀번호가 변경되었습니다.")
+            st.rerun()
+
+
 def render_teacher_mode() -> None:
+    tname = (st.session_state.get("teacher_display_name") or "").strip() or "선생님"
+    st.success(f"{tname} 선생님, 환영합니다!")
     st.header("교사 대시보드")
     st.caption("제출된 진단 기록을 한눈에 보고, 성취도를 분석하며 피드백을 남길 수 있습니다.")
     records = get_diagnostic_records()
@@ -632,6 +705,22 @@ def render_teacher_mode() -> None:
                 st.rerun()
             if (current.get("teacher_feedback") or "").strip():
                 st.caption(f"마지막 저장: {current.get('teacher_feedback_updated_at') or '-'}")
+    st.markdown("---")
+    st.subheader("최근 접속 기록")
+    st.caption("로그인 성공 시점 기준 · KST")
+    logs = list(reversed(st.session_state.get("teacher_login_logs") or []))
+    if not logs:
+        st.caption("저장된 접속 기록이 없습니다.")
+    else:
+        st.dataframe(
+            [{"교사 성함": e["teacher_name"], "접속 시각 (KST)": e["logged_in_at_kst"]} for e in logs[:30]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption("최근 30건만 표시합니다. 세션 종료 시 기록이 사라질 수 있습니다.")
+    st.caption(
+        "※ DB 미연결: 새로고침·서버 재시작 시 비밀번호는 0000으로 초기화될 수 있습니다."
+    )
     st.markdown("---")
     if records and st.button("모든 진단 기록 초기화 (데모용)"):
         st.session_state.diagnostic_records = []
@@ -825,6 +914,16 @@ def init_session_state() -> None:
     if "diagnosis_history" not in st.session_state:
         st.session_state.diagnosis_history = []
     migrate_legacy_history_if_needed()
+    if "teacher_password" not in st.session_state:
+        st.session_state.teacher_password = TEACHER_PASSWORD_DEFAULT
+    if "teacher_login_logs" not in st.session_state:
+        st.session_state.teacher_login_logs = []
+    if "teacher_logged_in" not in st.session_state:
+        st.session_state.teacher_logged_in = False
+    if "teacher_display_name" not in st.session_state:
+        st.session_state.teacher_display_name = ""
+
+
 def _consume_role_query_param() -> None:
     """랜딩 페이지의 카드 링크(?role=)로 진입 시 역할을 반영한다."""
     qp = st.query_params
@@ -841,9 +940,11 @@ def _consume_role_query_param() -> None:
             pass
     if val == "teacher":
         st.session_state.app_role = "teacher"
+        reset_teacher_session_soft()
         st.rerun()
     elif val == "student":
         st.session_state.app_role = "student"
+        reset_teacher_session_soft()
         st.rerun()
 
 
@@ -980,10 +1081,12 @@ def render_role_selection() -> None:
     with bc1:
         if st.button("교사 모드로 진입", key="landing_btn_teacher", use_container_width=True):
             st.session_state.app_role = "teacher"
+            reset_teacher_session_soft()
             st.rerun()
     with bc2:
         if st.button("학생 모드로 진입", key="landing_btn_student", use_container_width=True):
             st.session_state.app_role = "student"
+            reset_teacher_session_soft()
             st.rerun()
 
 
@@ -1002,8 +1105,15 @@ with st.sidebar:
     st.caption(f"현재 역할: **{role_label} 모드**")
     if st.button("역할 다시 선택"):
         st.session_state.app_role = None
+        reset_teacher_session_soft()
         st.rerun()
+    if st.session_state.app_role == "teacher" and st.session_state.get("teacher_logged_in"):
+        render_teacher_password_sidebar()
 if st.session_state.app_role == "teacher":
+    if not st.session_state.get("teacher_logged_in"):
+        st.title("자동차 전기전자제어 — 교사 모드")
+        render_teacher_login()
+        st.stop()
     st.title("자동차 전기전자제어 — 교사 모드")
     render_teacher_mode()
 else:
