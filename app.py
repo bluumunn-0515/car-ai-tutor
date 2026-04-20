@@ -511,19 +511,47 @@ def render_ncs_achievement(result_text: str, mode: str) -> None:
         st.markdown(summary)
     with st.expander("NCS 기반 분석 원문 보기"):
         st.write(result_text)
-def gs_app_sheets_ready() -> bool:
-    """Secrets + 연결 가능 여부 (st_gsheets_connection + 서비스 계정)."""
+def gs_app_sheets_status() -> tuple[bool, str]:
+    """Secrets + 연결 가능 여부를 확인하고 (성공여부, 상세메시지) 를 반환한다."""
     if not shb.gsheets_available():
-        return False
+        return False, (
+            "`st-gsheets-connection` 라이브러리 import 에 실패했습니다. "
+            "`requirements.txt` 에 `st-gsheets-connection` 이 포함되어 있고, "
+            "Streamlit Cloud 에서 앱이 재빌드(Reboot)되었는지 확인해 주세요."
+        )
     try:
-        _ = st.secrets["connections"]["gsheets"]
+        gs_secrets = st.secrets["connections"]["gsheets"]
     except Exception:
-        return False
+        return False, (
+            "Streamlit Secrets 에 `[connections.gsheets]` 섹션이 없습니다. "
+            "Streamlit Cloud 에서 앱 우측 상단 **Manage app → Settings → Secrets** 메뉴에 "
+            "`[connections.gsheets]` 아래로 `spreadsheet` URL 과 서비스 계정 JSON 필드 "
+            "(`type`, `private_key`, `client_email` 등) 를 등록한 뒤 Save 해주세요."
+        )
+    missing = []
+    for k in ("spreadsheet", "type", "private_key", "client_email"):
+        try:
+            v = gs_secrets.get(k) if hasattr(gs_secrets, "get") else gs_secrets[k]
+        except Exception:
+            v = None
+        if not str(v or "").strip():
+            missing.append(k)
+    if missing:
+        return False, (
+            "Secrets `[connections.gsheets]` 에 필수 필드가 비어있습니다: "
+            + ", ".join(missing)
+            + ". 서비스 계정 JSON 의 모든 필드를 채워주시고, `type` 은 반드시 `\"service_account\"` 이어야 합니다."
+        )
     try:
         shb.get_gsheets_connection()
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as exc:
+        return False, f"Google Sheets 연결 초기화 중 오류가 발생했습니다: {exc}"
+
+
+def gs_app_sheets_ready() -> bool:
+    ok, _ = gs_app_sheets_status()
+    return ok
 
 
 def get_diagnostic_records() -> list[dict]:
@@ -623,12 +651,10 @@ def render_teacher_mode() -> None:
     st.success(f"{tname} 선생님, 환영합니다!")
     st.header("교사 대시보드")
     st.caption("제출된 진단 기록을 한눈에 보고, 성취도를 분석하며 피드백을 남길 수 있습니다.")
-    if not gs_app_sheets_ready():
-        st.error(
-            "Google Sheets에 연결할 수 없습니다. `pip install st-gsheets-connection` 후 "
-            "`.streamlit/secrets.toml`의 `[connections.gsheets]`(spreadsheet URL + 서비스 계정)을 설정하고, "
-            "스프레드시트를 서비스 계정 이메일과 공유했는지 확인하세요."
-        )
+    ok, reason = gs_app_sheets_status()
+    if not ok:
+        st.error("Google Sheets 에 연결할 수 없습니다.")
+        st.info(reason)
         return
     prev_err = st.session_state.pop("_gsheets_read_error", None)
     if prev_err:
@@ -782,12 +808,39 @@ def render_student_login() -> None:
     st.caption(
         "※ 학생 계정은 **Google Sheets `users` 탭**에 저장됩니다. 비밀번호는 **해시**만 저장되며 시트에 평문으로 남지 않습니다."
     )
-    if not gs_app_sheets_ready():
-        st.error(
-            "Google Sheets에 연결할 수 없습니다. `pip install st-gsheets-connection` 후 "
-            "`.streamlit/secrets.toml`의 `[connections.gsheets]`를 설정하고, "
-            "스프레드시트에 `users` / `history` 워크시트를 만들어 주세요."
-        )
+    ok, reason = gs_app_sheets_status()
+    if not ok:
+        st.error("Google Sheets 에 연결할 수 없습니다.")
+        st.info(reason)
+        with st.expander("도움말 · Streamlit Cloud Secrets 설정 방법", expanded=False):
+            st.markdown(
+                """
+1. [Google Cloud Console](https://console.cloud.google.com/) 에서 **서비스 계정** 을 만들고 JSON 키를 받습니다.
+2. 대상 Google Sheets 스프레드시트를 서비스 계정의 `client_email` 에 **편집자** 권한으로 공유합니다.
+3. 스프레드시트에 `users`, `history` 두 개의 워크시트 탭을 만듭니다.
+4. Streamlit Cloud 앱 대시보드에서 **Manage app → Settings → Secrets** 에 아래와 같이 등록 후 저장합니다.
+
+```toml
+[connections.gsheets]
+spreadsheet = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = \"\"\"-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+\"\"\"
+client_email = "xxx@xxx.iam.gserviceaccount.com"
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+```
+
+5. 저장 후 앱을 **Reboot** 합니다.
+                """.strip()
+            )
         return
 
     stage = st.session_state.get("student_auth_stage", "idle")
