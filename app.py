@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 import uuid
@@ -7,6 +8,8 @@ from typing import Any, Optional
 import streamlit as st
 
 import sheets_backend as shb
+
+logger = logging.getLogger(__name__)
 try:
     from google import genai
     from google.genai import types
@@ -511,47 +514,74 @@ def render_ncs_achievement(result_text: str, mode: str) -> None:
         st.markdown(summary)
     with st.expander("NCS 기반 분석 원문 보기"):
         st.write(result_text)
-def gs_app_sheets_status() -> tuple[bool, str]:
-    """Secrets + 연결 가능 여부를 확인하고 (성공여부, 상세메시지) 를 반환한다."""
+def gs_app_sheets_ready() -> bool:
+    """Secrets 에 [connections.gsheets] 섹션이 있는지 + 실제 연결이 생성되는지 확인한다.
+
+    - 실패해도 사용자에게는 부드러운 안내만 하고, 구체적 원인(시트 URL / `type='service_account'` 등)은
+      `st.warning` 및 로그로 함께 남겨 운영자가 바로 원인 파악할 수 있도록 한다.
+    - 상세 경고 메시지는 세션 내 한 번만 표시되도록 중복 출력을 피한다.
+    """
+
+    def _warn_once(msg: str) -> None:
+        logger.warning("gs_app_sheets_ready: %s", msg)
+        shown = st.session_state.setdefault("_gsheets_warned_msgs", set())
+        if msg in shown:
+            return
+        shown.add(msg)
+        st.warning(msg)
+
     if not shb.gsheets_available():
-        return False, (
-            "`st-gsheets-connection` 라이브러리 import 에 실패했습니다. "
-            "`requirements.txt` 에 `st-gsheets-connection` 이 포함되어 있고, "
-            "Streamlit Cloud 에서 앱이 재빌드(Reboot)되었는지 확인해 주세요."
+        _warn_once(
+            "Google Sheets 연동 라이브러리(`st-gsheets-connection`) 가 아직 로드되지 않았습니다. "
+            "`requirements.txt` 에 해당 패키지가 포함되어 있는지, Streamlit Cloud 에서 앱이 Reboot 되었는지 확인해 주세요."
         )
+        return False
+
     try:
         gs_secrets = st.secrets["connections"]["gsheets"]
     except Exception:
-        return False, (
-            "Streamlit Secrets 에 `[connections.gsheets]` 섹션이 없습니다. "
-            "Streamlit Cloud 에서 앱 우측 상단 **Manage app → Settings → Secrets** 메뉴에 "
-            "`[connections.gsheets]` 아래로 `spreadsheet` URL 과 서비스 계정 JSON 필드 "
-            "(`type`, `private_key`, `client_email` 등) 를 등록한 뒤 Save 해주세요."
+        _warn_once(
+            "Secrets 에 `[connections.gsheets]` 섹션이 보이지 않습니다. "
+            "Streamlit Cloud **Manage app → Settings → Secrets** 에 해당 섹션을 추가해 주세요. "
+            "(시트 URL(`spreadsheet`) 과 `type = \"service_account\"` 를 포함한 서비스 계정 JSON 필드가 필요합니다.)"
         )
-    missing = []
-    for k in ("spreadsheet", "type", "private_key", "client_email"):
+        return False
+
+    def _get(k: str) -> str:
         try:
             v = gs_secrets.get(k) if hasattr(gs_secrets, "get") else gs_secrets[k]
         except Exception:
             v = None
-        if not str(v or "").strip():
-            missing.append(k)
-    if missing:
-        return False, (
-            "Secrets `[connections.gsheets]` 에 필수 필드가 비어있습니다: "
-            + ", ".join(missing)
-            + ". 서비스 계정 JSON 의 모든 필드를 채워주시고, `type` 은 반드시 `\"service_account\"` 이어야 합니다."
+        return str(v or "").strip()
+
+    spreadsheet = _get("spreadsheet")
+    sec_type = _get("type")
+    if not spreadsheet:
+        _warn_once(
+            "`[connections.gsheets]` 의 `spreadsheet` 값이 비어 있습니다. "
+            "대상 Google Sheets 의 전체 URL을 넣어주세요. "
+            "(예: `spreadsheet = \"https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit\"`)"
         )
+    if sec_type != "service_account":
+        _warn_once(
+            "`[connections.gsheets].type` 이 `\"service_account\"` 가 아닙니다. "
+            "현재 값: "
+            + (f"`{sec_type}`" if sec_type else "(없음)")
+            + ". 서비스 계정 JSON 을 사용하려면 `type = \"service_account\"` 로 설정해야 합니다."
+        )
+
     try:
         shb.get_gsheets_connection()
-        return True, ""
     except Exception as exc:
-        return False, f"Google Sheets 연결 초기화 중 오류가 발생했습니다: {exc}"
+        logger.exception("get_gsheets_connection() raised")
+        _warn_once(
+            f"Google Sheets 연결 초기화 실패: {exc}. "
+            "시트 URL이 올바른지, 서비스 계정 이메일(`client_email`) 에 편집자 권한으로 공유했는지, "
+            "`private_key` 가 여러 줄 그대로 보존됐는지(`\"\"\"...\"\"\"` 권장) 확인해 주세요."
+        )
+        return False
 
-
-def gs_app_sheets_ready() -> bool:
-    ok, _ = gs_app_sheets_status()
-    return ok
+    return True
 
 
 def get_diagnostic_records() -> list[dict]:
@@ -651,10 +681,11 @@ def render_teacher_mode() -> None:
     st.success(f"{tname} 선생님, 환영합니다!")
     st.header("교사 대시보드")
     st.caption("제출된 진단 기록을 한눈에 보고, 성취도를 분석하며 피드백을 남길 수 있습니다.")
-    ok, reason = gs_app_sheets_status()
-    if not ok:
-        st.error("Google Sheets 에 연결할 수 없습니다.")
-        st.info(reason)
+    if not gs_app_sheets_ready():
+        st.info(
+            "Google Sheets 연결이 아직 준비되지 않았습니다. 위 안내를 확인한 뒤 "
+            "Secrets 설정이 반영되면 다시 이 페이지를 열어 주세요."
+        )
         return
     prev_err = st.session_state.pop("_gsheets_read_error", None)
     if prev_err:
@@ -808,39 +839,11 @@ def render_student_login() -> None:
     st.caption(
         "※ 학생 계정은 **Google Sheets `users` 탭**에 저장됩니다. 비밀번호는 **해시**만 저장되며 시트에 평문으로 남지 않습니다."
     )
-    ok, reason = gs_app_sheets_status()
-    if not ok:
-        st.error("Google Sheets 에 연결할 수 없습니다.")
-        st.info(reason)
-        with st.expander("도움말 · Streamlit Cloud Secrets 설정 방법", expanded=False):
-            st.markdown(
-                """
-1. [Google Cloud Console](https://console.cloud.google.com/) 에서 **서비스 계정** 을 만들고 JSON 키를 받습니다.
-2. 대상 Google Sheets 스프레드시트를 서비스 계정의 `client_email` 에 **편집자** 권한으로 공유합니다.
-3. 스프레드시트에 `users`, `history` 두 개의 워크시트 탭을 만듭니다.
-4. Streamlit Cloud 앱 대시보드에서 **Manage app → Settings → Secrets** 에 아래와 같이 등록 후 저장합니다.
-
-```toml
-[connections.gsheets]
-spreadsheet = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
-type = "service_account"
-project_id = "..."
-private_key_id = "..."
-private_key = \"\"\"-----BEGIN PRIVATE KEY-----
-...
------END PRIVATE KEY-----
-\"\"\"
-client_email = "xxx@xxx.iam.gserviceaccount.com"
-client_id = "..."
-auth_uri = "https://accounts.google.com/o/oauth2/auth"
-token_uri = "https://oauth2.googleapis.com/token"
-auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-client_x509_cert_url = "..."
-```
-
-5. 저장 후 앱을 **Reboot** 합니다.
-                """.strip()
-            )
+    if not gs_app_sheets_ready():
+        st.info(
+            "서버 설정 업데이트 중입니다. 잠시 후 다시 시도해 주세요. "
+            "문제가 지속되면 담당 선생님께 알려 주세요."
+        )
         return
 
     stage = st.session_state.get("student_auth_stage", "idle")
