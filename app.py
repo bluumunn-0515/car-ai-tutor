@@ -248,6 +248,30 @@ def reset_student_session_soft() -> None:
     reset_student_auth_form()
     st.session_state.student_id = ""
     st.session_state.student_display_name = ""
+    reset_diagnosis_flow()
+
+
+def reset_diagnosis_flow() -> None:
+    """2단계 진단 플로우 상태를 초기화한다(새 진단 시작 / 로그아웃 시 사용)."""
+    st.session_state.diag_step = "input"
+    st.session_state.latest_guidance = ""
+    st.session_state.latest_evaluation = ""
+    st.session_state.latest_execution_result = ""
+    st.session_state.latest_result = ""
+    st.session_state.latest_symptom = ""
+    st.session_state.latest_generated_at = ""
+    for widget_key in (
+        "diag_target_part",
+        "diag_current_state",
+        "diag_learning_question",
+        "diag_uploaded_image",
+        "diag_execution_result",
+    ):
+        if widget_key in st.session_state:
+            try:
+                del st.session_state[widget_key]
+            except Exception:
+                st.session_state[widget_key] = "" if widget_key != "diag_uploaded_image" else None
 def compose_structured_symptom(target_part: str, current_state: str, learning_question: str) -> str:
     """학생의 [대상 부품/현재 상태/학습 질문] 입력을 AI가 인지 가능한 구조화된 블록으로 합친다.
 
@@ -306,88 +330,169 @@ def build_learning_prompt(
     user_symptom: str,
     selected_subject: str,
     selected_unit: str,
+    mode: str = "학습 모드",
 ) -> str:
+    """[단계 1] AI 가이드(미션) 프롬프트.
+
+    - 정답을 직접 알려주지 않고 '진단 방향'과 '측정/점검 방법'만 미션 형태로 제시한다.
+    - 출력은 불렛(•)과 표(Table)를 적극 사용해 가독성을 높인다.
+    """
     symptom_block = user_symptom if user_symptom else "학생이 구체적인 질문 없이 부품 사진만 업로드함."
     rubric_block = _rubric_lines_for_unit(selected_unit)
+    tone_block = (
+        "[톤] 친근하고 교육적인 코치 톤. 학생이 스스로 답을 찾도록 힌트와 소크라테스식 질문을 활용한다."
+        if mode == "학습 모드"
+        else "[톤] 단정적 정답 노출 없이, NCS 평가 기준에 부합하도록 객관적이고 절차 중심으로 안내한다."
+    )
     return f"""
-너는 특성화고 '자동차 전기전자제어' 교과 실습 수업을 돕는 AI 튜터이며,
-자동차 전장(電裝) 시스템 — 배터리/시동·충전/조명/편의/네트워크 통신 — 분야의 전문가다.
-오직 '자동차 전기전자제어' 영역의 지식 범위 안에서만 답변하며, 엔진 기계요소·샤시 기구 등 본 교과를 벗어난 주제는 다루지 않는다.
-답변은 NCS 학습모듈(LM1506030101/102/104/105/106/108)과 '자동차 전기·전자 제어 2022(보안)' 교과서에 명시된 절차와 용어를 기준으로 한다.
-[선택 교과]
-{selected_subject}
-[선택 단원(능력단위) — 이 단원의 NCS 수행준거에 집중]
-{selected_unit}
+너는 특성화고 '자동차 전기전자제어' 교과 실습 수업의 AI 튜터이며,
+자동차 전장(電裝) 시스템 — 배터리/시동·충전/조명/편의/네트워크 통신 — 분야 전문가다.
+지금은 **[단계 1] 진단 가이드(미션) 단계**다. 절대 정답(예: "이 배터리는 방전 상태이다", "이 IPS가 고장이다")을
+단정하여 알려주지 말고, **학생이 직접 측정·확인할 수 있는 '진단 방향'과 '측정/점검 방법'만** 제시한다.
+답변은 NCS 학습모듈(LM1506030101/102/104/105/106/108)과 '자동차 전기·전자 제어 2022(보안)' 교과서에 명시된 절차·용어를 기준으로 한다.
+
+[선택 교과] {selected_subject}
+[선택 단원(능력단위)] {selected_unit}
 [이 단원의 수행준거 요약]
 {rubric_block}
 {STANDARD_PROCEDURE_BLOCK}
 [학생 입력 증상]
 {symptom_block}
-작성 원칙:
-- 친절하고 교육적인 어조
-- 정답을 바로 단정하지 말고 힌트와 소크라테스식 질문 포함
-- 감전·단락·배터리 단자 안전 등 전기전자 작업의 안전 점검을 최우선으로 강조하고, 위 [표준 절차]의 "가. 멀티미터 사용 전 안전 점검"과 "나. 회로도 분석 순서"를 답변 흐름에 자연스럽게 녹여낸다.
-- [학생 입력 증상]은 가능하면 **[대상 부품] / [현재 상태] / [학습 질문 — 우선 응답 요청]** 세 블록으로 구조화되어 들어온다.
-  · [대상 부품]: 학생이 점검 중인 실제 부품을 가리키는 핵심 단서. 회로도 상 위치를 함께 짚어 준다.
-  · [현재 상태]: 학생이 관찰·측정한 결과. 규정값 범위와 비교해 정상/이상 여부를 우선 판단해 준다.
-  · [학습 질문]: 학생이 가장 궁금해하거나 막혀 있는 지점. **이 질문이 비어 있지 않다면 0)~5) 어느 항목이든 답변 안에서 반드시 명시적으로 다루며**, 학습 질문에 대한 힌트·소크라테스식 되짚기를 우선 배치한다. 단, 정답을 곧장 단정하지 말고 학생이 스스로 결론에 닿도록 유도한다.
-- 반드시 위 [선택 단원]의 기술적 특성(예: 배터리 점검이면 OCV·CCA·SOC·암전류 50mA, 시동·충전이면 솔레노이드 B/ST/M단자·발전기 13.8~14.9V·전압강하 0.2V, 조명이면 등화회로·플래셔·BCM/IPS·B-CAN, 편의장치면 BCM·ETACS·릴레이 85/86/30/87, 네트워크면 CAN/LIN·종단저항 120Ω·bus-off/time-out)을 우선적으로 다룰 것
-- 위 [이 단원의 수행준거 요약]에 제시된 키워드 예시는 가능한 한 실제 답변에 자연스럽게 포함시켜 학생이 NCS 수행준거 용어에 익숙해지도록 유도한다.
-- 단원과 무관한 일반론 위주의 답변은 피하고, 해당 단원의 NCS 수행준거에 정렬된 질문/힌트를 제시
-- 학생이 질문 없이 사진만 올린 경우에도 반드시 대응
-- 부품 식별 신뢰도가 낮으면 "신뢰도 낮음"을 명시하고 추가 사진 요청을 먼저 제시
-- 추가 사진 요청 시 각도(정면/측면/후면), 거리(근접/중간), 초점(커넥터/라벨/배선)을 구체적으로 안내
-반드시 지킬 출력 순서:
-0) **학습 시작 질문**: 선택 단원 수행준거 중 가장 핵심이 되는 요소 하나를 골라, 학생이 스스로 생각하게 만드는 소크라테스식 개방형 질문 1문장으로 시작한다. (이 문장이 전체 답변의 첫 문장이어야 한다.)
-그 다음 형식으로 한국어로 답변:
-1) 사진 속 부품 명칭 추정(신뢰도와 함께) — 선택 단원과의 연관성 및 전장 회로 내 위치 명시
-2) 해당 부품의 일반적인 고장 증상과 입력 증상 연결(이 단원 관점에서, 회로도 흐름: 전원→퓨즈→스위치/릴레이→부하→접지 순으로 추적)
-3) 가장 먼저 해야 할 측정 작업(우선순위 1~3, 안전 주의사항 포함) — [표준 절차 가·나]에 따른 사전 안전 점검과 회로도 분석 순서를 먼저 명시한 뒤, 단원 특성에 맞는 계측 항목(예: OCV / 전압강하 / 종단저항 등)을 제시
-4) 멀티미터(또는 스캐너/오실로스코프 등 단원에 적합한 장비) 측정 위치 안내 — 단자/리드봉 위치, 규정값 범위, 측정 모드(DC V·Ω·통전 등)를 구체적으로 명시
-5) 추가 촬영 가이드(신뢰도 낮을 때 필수)와 학생 스스로 생각해볼 질문/핵심 정리(가능하면 스캐너 절차 "DTC → 센서 데이터 → 강제구동" 순서로 다음 실습 방향 제시)
+
+{tone_block}
+
+[작성 원칙 — 반드시 준수]
+- ❌ 결론·정답 단정 금지(예: "원인은 ~다", "~를 교체하면 됩니다" 등 직접적 답).
+- ✅ 진단 방향과 측정/점검 절차를 **'미션' 형태**로 제시.
+- ✅ 장황한 서술 대신 **불렛(•)과 표(Markdown table)**를 적극 사용.
+- ✅ 단원 핵심 키워드(예: OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 자연스럽게 포함.
+- ✅ [표준 절차]의 (가) 안전 점검 → (나) 회로도 분석(전원→퓨즈→스위치/릴레이→부하→접지) → (다) 시험등 vs DMM 사용 기준 → (라) 스캐너 절차(DTC→센서데이터→강제구동) 흐름을 미션에 녹인다.
+- ✅ [학생 입력 증상]에 [학습 질문]이 비어 있지 않다면, **`💡 학습 질문 힌트` 섹션에서 그 질문을 우선적으로 다룬다**(정답은 X, 소크라테스식 힌트만).
+- ✅ 부품 식별 신뢰도가 낮으면 `📷 추가 촬영 가이드` 섹션에서 각도/거리/초점을 구체적으로 안내.
+
+[출력 형식 — 아래 마크다운 구조를 그대로 따른다]
+
+## 🎯 미션 요약
+• (한 문장으로 학생이 이번 실습에서 수행할 핵심 미션)
+
+## 📍 점검 대상
+• 추정 부품 명칭(신뢰도): …
+• 회로 내 위치/역할: …
+• 단원과의 연관성: …
+
+## 🛠 권장 측정 도구
+| 도구 | 측정 모드/레인지 | 사용 목적 |
+| --- | --- | --- |
+| 디지털 멀티미터 | DC V / Ω / 통전 | … |
+| (필요 시) 스캐너 | DTC·센서데이터·강제구동 | … |
+| (필요 시) 시험등/오실로스코프 | … | … |
+
+## 📋 NCS 기반 수행 순서 (Mission Steps)
+| 단계 | 행동(미션) | 안전·규정값 핵심 포인트 |
+| --- | --- | --- |
+| 1 | 안전 점검(절연장갑·단자 보호 등) | 단락 방지, 점화스위치 OFF 확인 |
+| 2 | 회로도 분석: 전원→퓨즈→스위치/릴레이→부하→접지 | 단원 핵심 회로 흐름 명시 |
+| 3 | 측정 미션 1 | 규정값 범위(예: OCV 12.3~12.9V) |
+| 4 | 측정 미션 2 | … |
+| 5 | (필요 시) 스캐너 진단 | DTC→센서데이터→강제구동 순서 |
+
+## ⚠ 안전 주의
+• …
+• …
+
+## 💡 학습 질문 힌트
+• (학생의 [학습 질문]을 그대로 인용한 뒤, 답이 아니라 **다음에 어떤 측정/관찰을 해보면 단서가 잡힐지** 힌트만 제시)
+• 소크라테스식 되묻기 1~2개
+
+## 📷 추가 촬영 가이드 (신뢰도 낮은 경우만)
+• 각도/거리/초점 …
+
+[중요] 위 7개 섹션 헤더(##)를 정확히 그대로 사용한다. 표는 반드시 Markdown 표 형식으로 작성한다.
 """.strip()
 def build_evaluation_prompt(
     user_symptom: str,
     student_reasoning: str,
     selected_subject: str,
     selected_unit: str,
+    guidance_text: str = "",
+    mode: str = "평가 모드",
 ) -> str:
+    """[단계 2] 실습 수행 결과 평가 프롬프트.
+
+    - [단계 1]에서 AI가 제시한 가이드(미션) 대비 학생 수행 결과의 충실도를 표 형태로 정리한다.
+    - 정답 단정은 피하되, 가이드 미이행 항목은 명확히 짚어 보완 방향을 제시한다.
+    """
     symptom_block = user_symptom if user_symptom else "학생이 구체적인 질문 없이 부품 사진만 업로드함."
+    reasoning_block = student_reasoning if student_reasoning.strip() else "(학생이 실습 수행 결과를 입력하지 않음)"
+    guidance_block = guidance_text.strip() if guidance_text and guidance_text.strip() else "(이전 단계 가이드가 비어 있음)"
     rubric_block = _rubric_lines_for_unit(selected_unit)
+    tone_block = (
+        "[톤] 학생을 격려하면서도 NCS 수행준거에 비춰 객관적으로 짚는 코치 톤."
+        if mode == "학습 모드"
+        else "[톤] 객관적·절차 중심. 합격/불합격 표현은 금지하되 보완 항목은 분명히 명시한다."
+    )
     return f"""
-너는 특성화고 '자동차 전기전자제어' 교과 실습의 평가 코치이며,
-자동차 전장(電裝) 시스템 — 배터리/시동·충전/조명/편의/네트워크 통신 — 분야의 전문가다.
-평가는 오직 '자동차 전기전자제어' 영역에서, 그리고 [선택 단원]의 NCS 수행준거에 정렬되어야 한다.
+너는 특성화고 '자동차 전기전자제어' 교과 실습의 평가 코치다.
+지금은 **[단계 2] 학생의 실습 수행 결과 평가 단계**이며, [단계 1]에서 너 자신이 제시한 가이드(미션)와
+학생이 실제로 측정·관찰·판단한 결과를 비교해 **충실도(faithfulness)** 와 **NCS 수행준거 정렬도**를 평가한다.
 평가 기준은 NCS 학습모듈(LM1506030101/102/104/105/106/108)과 '자동차 전기·전자 제어 2022(보안)' 교과서의 표준 절차를 따른다.
-[선택 교과]
-{selected_subject}
-[선택 단원(능력단위) — 이 단원 기준으로 평가]
-{selected_unit}
+
+[선택 교과] {selected_subject}
+[선택 단원(능력단위)] {selected_unit}
 [이 단원의 수행준거 요약]
 {rubric_block}
 {STANDARD_PROCEDURE_BLOCK}
+
 [학생 입력 증상]
 {symptom_block}
-[학생 진단 논리/측정 해석]
-{student_reasoning}
-작성 원칙:
-- '합격/불합격' 표현 금지
-- 부족한 점은 "보완이 필요한 능력 단위 요소" 중심으로 제시
-- 평가 근거와 피드백은 반드시 [선택 단원]의 기술적 특성과 위 [이 단원의 수행준거 요약]에 명시된 키워드(예: OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 직접 인용하며 구체화
-- 학생 진단 논리 안에서 위 [표준 절차]의 (가) 안전 점검, (나) 회로도 분석 순서, (다) 시험등 vs 디지털 멀티미터 사용 기준, (라) 스캐너 사용 절차(DTC→센서 데이터→강제구동)가 어느 정도 지켜졌는지 명확히 짚어 평가한다.
-- [학생 입력 증상]은 가능하면 **[대상 부품] / [현재 상태] / [학습 질문 — 우선 응답 요청]** 세 블록으로 구조화되어 들어온다.
-  · [대상 부품]·[현재 상태]는 평가 시 부품 식별 정합성과 측정값 해석의 적정성을 판단하는 1차 근거로 사용한다.
-  · [학습 질문]이 비어 있지 않다면 항목 2)와 4) 안에서 **그 질문에 대한 명확한 가이드**를 반드시 제시하고, 학생이 어느 수행준거에서 막혀 있는지 진단해 보완 방향을 알려준다.
-- 개선을 위한 구체적 실습 제안 포함(해당 단원에서 학생이 다음에 수행할 측정/진단 과제 형태, 규정값 범위와 측정 포인트 명시)
-- 사진만 있는 경우 먼저 부품 명칭을 추정하고 평가 근거를 설명
-- 부품 식별 신뢰도가 낮으면 우선 평가를 단정하지 말고 "추가 사진 필요"를 먼저 제시
-- 추가 사진 요청 시 각도(정면/측면/후면), 거리(근접/중간), 초점(커넥터/라벨/배선) 체크리스트를 제공
-다음 형식으로 한국어로 답변:
-1) 사진 속 부품 명칭 추정 및 관련 고장 증상 연결(이 단원 관점에서, 회로 내 위치/역할 명시)
-2) NCS 기준 진단 분석 — (a) 안전 점검 (b) 회로도 분석 순서 (c) 계측 절차/규정값 인용 (d) 진단장비 활용 흐름 네 측면에서 강점·근거 평가
-3) 보완이 필요한 능력 단위 요소(해당 단원의 핵심 수행준거 기준, 누락된 표준 절차 단계 명시)
-4) 가장 먼저 해야 할 측정 작업 우선순위(단원에 적합한 계측 장비·측정 모드·규정값 포함)
-5) 멀티미터(또는 단원에 적합한 장비) 측정 위치, 추가 촬영 가이드(필요 시), 다음 실습 과제(스캐너 DTC/센서 데이터/강제구동을 활용한 후속 학습 동선 포함)
+
+[단계 1 AI 가이드(미션)]
+{guidance_block}
+
+[학생 실습 수행 결과 / 측정 해석]
+{reasoning_block}
+
+{tone_block}
+
+[작성 원칙 — 반드시 준수]
+- ❌ '합격/불합격' 표현 금지.
+- ❌ 정답을 단정하여 노출하지 말 것(필요 시 "권장 진단 방향" 정도로 표현).
+- ✅ **불렛(•)과 표(Markdown table)** 를 적극 사용해 가독성 우선.
+- ✅ [단계 1 AI 가이드]의 미션 단계와 학생 수행 결과를 **표로 1:1 비교**해 충실도를 별점/이모지(★★★ / ★★☆ / ★☆☆ / ☆☆☆)로 표기.
+- ✅ 표준 절차 (가)안전 점검 / (나)회로도 분석 / (다)시험등 vs DMM / (라)스캐너 절차(DTC→센서데이터→강제구동) 네 측면에서 강·약점을 짚는다.
+- ✅ 단원 핵심 키워드(OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 인용해 구체화.
+- ✅ [학생 입력 증상]에 [학습 질문]이 있다면, `다음 학습 미션` 섹션에서 그 질문에 직접적으로 도움이 되는 후속 실습을 제안한다.
+
+[출력 형식 — 아래 마크다운 구조를 그대로 따른다]
+
+## 📋 평가 한줄 요약
+• (이번 실습 수행을 한 줄로 평가)
+
+## ✅ 가이드 대비 수행 충실도
+| 미션 단계 | 가이드 권장 동작 | 학생 수행 결과 | 충실도 |
+| --- | --- | --- | --- |
+| 1 | 안전 점검 | … | ★★☆ |
+| 2 | 회로도 분석(전원→…→접지) | … | ★☆☆ |
+| 3 | 측정 미션 1 | … | ★★★ |
+| 4 | 측정 미션 2 | … | ☆☆☆ |
+| 5 | (해당 시) 스캐너 절차 | … | … |
+
+## 🔍 NCS 기준 4축 분석
+| 분석 축 | 학생 수행에서 확인된 점 | 보완 필요 |
+| --- | --- | --- |
+| (가) 안전 점검 | … | … |
+| (나) 회로도 분석 순서 | … | … |
+| (다) 계측 절차/규정값 | … | … |
+| (라) 진단장비 활용(DTC→센서데이터→강제구동) | … | … |
+
+## 🛠 보완이 필요한 능력 단위 요소
+• (해당 단원의 핵심 수행준거 기준으로, 누락된 표준 절차 단계 또는 규정값 인용 부족 항목 나열)
+
+## 🚀 다음 학습 미션
+• 다음에 학생이 수행할 구체적인 측정/진단 과제(규정값·측정 포인트 포함)
+• [학습 질문]에 대한 후속 실습 동선 제안
+
+[중요] 위 4개 섹션 헤더(##)를 정확히 그대로 사용한다. 표는 반드시 Markdown 표 형식으로 작성한다.
 """.strip()
 def ask_gemini(
     mode: str,
@@ -397,12 +502,32 @@ def ask_gemini(
     key: str,
     selected_subject: str,
     selected_unit: str,
+    step: str = "guidance",
+    guidance_text: str = "",
 ) -> str:
+    """Gemini 호출 진입점.
+
+    - step="guidance" → [단계 1] AI 미션/가이드 생성 (build_learning_prompt)
+    - step="evaluation" → [단계 2] 실습 수행 결과 평가 (build_evaluation_prompt)
+      · guidance_text 인자로 [단계 1]의 가이드를 함께 전달해야 충실도 비교가 가능하다.
+    """
     client = genai.Client(api_key=key)
-    if mode == "학습 모드":
-        prompt = build_learning_prompt(user_symptom, selected_subject, selected_unit)
+    if step == "evaluation":
+        prompt = build_evaluation_prompt(
+            user_symptom=user_symptom,
+            student_reasoning=student_reasoning,
+            selected_subject=selected_subject,
+            selected_unit=selected_unit,
+            guidance_text=guidance_text,
+            mode=mode,
+        )
     else:
-        prompt = build_evaluation_prompt(user_symptom, student_reasoning, selected_subject, selected_unit)
+        prompt = build_learning_prompt(
+            user_symptom=user_symptom,
+            selected_subject=selected_subject,
+            selected_unit=selected_unit,
+            mode=mode,
+        )
     parts = [types.Part.from_text(text=prompt)]
     if image_file is not None:
         image_bytes = image_file.getvalue()
@@ -448,6 +573,10 @@ def ask_gemini(
         f"(마지막 오류: {last_error})"
     )
 def split_sections(result_text: str) -> dict:
+    """[Legacy] 0)~5) 번호로 나뉜 옛 포맷 결과를 섹션별로 쪼갠다.
+
+    신규 2단계 미션/평가 포맷에는 사용되지 않으며, 옛 이력(history) 데이터 호환용으로만 남긴다.
+    """
     pattern = r"(?:^|\n)\s*(0\)|1\)|2\)|3\)|4\)|5\))\s*"
     parts = re.split(pattern, result_text)
     sections = {
@@ -468,6 +597,46 @@ def split_sections(result_text: str) -> dict:
         if key in sections:
             parsed[sections[key]] = value
     return parsed
+
+
+_GUIDANCE_HEADER = "[단계 1 AI 가이드]"
+_EVALUATION_HEADER = "[단계 2 실습 수행 평가]"
+
+
+def compose_combined_result(guidance_text: str, evaluation_text: str) -> str:
+    """history 시트에 저장할 단일 result 필드 형태로 두 단계 결과를 합친다."""
+    parts: list[str] = []
+    if guidance_text and guidance_text.strip():
+        parts.append(f"{_GUIDANCE_HEADER}\n{guidance_text.strip()}")
+    if evaluation_text and evaluation_text.strip():
+        parts.append(f"{_EVALUATION_HEADER}\n{evaluation_text.strip()}")
+    return "\n\n---\n\n".join(parts)
+
+
+def split_combined_result(combined_text: str) -> tuple[str, str]:
+    """compose_combined_result로 합쳐진 결과를 (guidance, evaluation)로 분리한다.
+
+    옛 포맷(헤더 없음) 데이터의 경우 evaluation 한쪽으로 모아서 반환한다.
+    """
+    text = combined_text or ""
+    if _GUIDANCE_HEADER not in text and _EVALUATION_HEADER not in text:
+        return "", text.strip()
+    guidance = ""
+    evaluation = ""
+    if _GUIDANCE_HEADER in text:
+        after_g = text.split(_GUIDANCE_HEADER, 1)[1]
+        if _EVALUATION_HEADER in after_g:
+            guidance, _, rest = after_g.partition(_EVALUATION_HEADER)
+            evaluation = rest
+        else:
+            guidance = after_g
+    elif _EVALUATION_HEADER in text:
+        evaluation = text.split(_EVALUATION_HEADER, 1)[1]
+    guidance = guidance.strip().lstrip("-").strip()
+    evaluation = evaluation.strip().lstrip("-").strip()
+    return guidance, evaluation
+
+
 def extract_evidence_snippet(text: str, keyword: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in lines:
@@ -479,46 +648,83 @@ def extract_evidence_snippet(text: str, keyword: str) -> str:
     start = max(0, idx - 35)
     end = min(len(text), idx + len(keyword) + 35)
     return text[start:end].replace("\n", " ")
-def render_feedback_cards(result_text: str, mode: str) -> None:
+def _is_legacy_numbered_format(text: str) -> bool:
+    """옛 0)~5) 번호 섹션 포맷인지 확인."""
+    if not text:
+        return False
+    if "## 🎯" in text or "## 📋" in text or "## ✅" in text:
+        return False
+    return bool(re.search(r"(?:^|\n)\s*[1-5]\)\s", text))
+
+
+def _render_legacy_feedback(result_text: str, mode: str) -> None:
+    """옛 0)~5) 포맷 이력 데이터 렌더링(과거 history 호환)."""
     parsed = split_sections(result_text)
     if mode == "학습 모드":
         titles = [
-            "학습 시작 질문",
-            "부품 명칭 추정",
-            "고장 증상 연결",
-            "우선 측정 작업",
-            "멀티미터 측정 위치",
-            "질문/핵심 정리",
+            "학습 시작 질문", "부품 명칭 추정", "고장 증상 연결",
+            "우선 측정 작업", "멀티미터 측정 위치", "질문/핵심 정리",
         ]
         keys = ["영역 0", "영역 1", "영역 2", "영역 3", "영역 4", "영역 5"]
     else:
         titles = [
-            "부품 명칭 추정/증상 연결",
-            "NCS 기준 진단 분석",
-            "보완이 필요한 능력 단위 요소",
-            "우선 측정 작업",
+            "부품 명칭 추정/증상 연결", "NCS 기준 진단 분석",
+            "보완이 필요한 능력 단위 요소", "우선 측정 작업",
             "멀티미터 위치/다음 실습 과제",
         ]
         keys = ["영역 1", "영역 2", "영역 3", "영역 4", "영역 5"]
-    if mode == "학습 모드":
-        col1, col2 = st.columns(2)
-        with col1:
-            st.success(f"### {titles[0]}\n\n{parsed[keys[0]] or '응답 내용 없음'}")
-            st.info(f"### {titles[1]}\n\n{parsed[keys[1]] or '응답 내용 없음'}")
-            st.warning(f"### {titles[2]}\n\n{parsed[keys[2]] or '응답 내용 없음'}")
-        with col2:
-            st.success(f"### {titles[3]}\n\n{parsed[keys[3]] or '응답 내용 없음'}")
-            st.markdown(f"### {titles[4]}\n\n{parsed[keys[4]] or '응답 내용 없음'}")
-        st.markdown(f"### {titles[5]}\n\n{parsed[keys[5]] or '응답 내용 없음'}")
-    else:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"### {titles[0]}\n\n{parsed[keys[0]] or '응답 내용 없음'}")
-            st.warning(f"### {titles[1]}\n\n{parsed[keys[1]] or '응답 내용 없음'}")
-        with col2:
-            st.success(f"### {titles[2]}\n\n{parsed[keys[2]] or '응답 내용 없음'}")
-            st.markdown(f"### {titles[3]}\n\n{parsed[keys[3]] or '응답 내용 없음'}")
-        st.markdown(f"### {titles[4]}\n\n{parsed[keys[4]] or '응답 내용 없음'}")
+    for title, key in zip(titles, keys):
+        body = parsed.get(key, "") or "응답 내용 없음"
+        with st.container(border=True):
+            st.markdown(f"#### {title}")
+            st.markdown(body)
+
+
+def render_mission_card(guidance_text: str) -> None:
+    """[단계 1] AI 미션/가이드 카드 렌더링.
+
+    프롬프트가 지시한 마크다운(##, 표, 불렛)을 그대로 렌더하되, 카드 컨테이너로 감싼다.
+    """
+    if not guidance_text or not guidance_text.strip():
+        st.caption("아직 생성된 가이드가 없습니다.")
+        return
+    with st.container(border=True):
+        st.markdown("##### 🧭 AI 진단 가이드 (Mission)")
+        st.caption("정답이 아니라 '진단 방향'과 '측정/점검 방법'을 미션 형태로 안내합니다.")
+        st.markdown(guidance_text)
+
+
+def render_evaluation_card(evaluation_text: str) -> None:
+    """[단계 2] 실습 수행 평가 카드 렌더링."""
+    if not evaluation_text or not evaluation_text.strip():
+        st.caption("아직 생성된 평가가 없습니다.")
+        return
+    with st.container(border=True):
+        st.markdown("##### 📝 실습 수행 평가 (Step 2 Result)")
+        st.caption("[단계 1] 가이드 대비 학생 수행 결과의 충실도와 NCS 정렬도를 평가합니다.")
+        st.markdown(evaluation_text)
+
+
+def render_feedback_cards(result_text: str, mode: str) -> None:
+    """이력/현재 결과 모두를 처리하는 통합 피드백 렌더러.
+
+    - 신규 포맷: compose_combined_result로 합쳐진 (가이드 + 평가) 텍스트.
+    - 옛 포맷: 0)~5) 번호 섹션. 이전 학생 이력 호환을 위해 레거시 렌더로 fallback.
+    """
+    if not result_text or not result_text.strip():
+        st.caption("응답 내용 없음")
+        return
+    if _is_legacy_numbered_format(result_text):
+        _render_legacy_feedback(result_text, mode)
+        return
+    guidance_text, evaluation_text = split_combined_result(result_text)
+    if guidance_text:
+        render_mission_card(guidance_text)
+    if evaluation_text:
+        render_evaluation_card(evaluation_text)
+    if not guidance_text and not evaluation_text:
+        with st.container(border=True):
+            st.markdown(result_text)
 def render_photo_retake_notice(result_text: str) -> None:
     lowered = result_text.lower()
     trigger_keywords = ["신뢰도 낮음", "추가 사진", "추가 촬영", "재촬영", "식별 어려움"]
@@ -542,25 +748,59 @@ def render_photo_upload_checklist(selected_unit: Optional[str] = None) -> None:
             st.markdown(f"**[{selected_unit}] 단원별 체크리스트**")
             st.markdown("\n".join(f"- {item}" for item in unit_items))
         st.caption("체크리스트를 만족할수록 부품 식별 신뢰도와 측정 안내 정확도가 올라갑니다.")
-def calculate_ncs_scores(result_text: str, mode: str) -> dict:
+def calculate_ncs_scores(
+    result_text: str,
+    mode: str,
+    guidance_text: str = "",
+) -> dict:
+    """NCS 수행준거 기반 성취도 계산.
+
+    신 포맷에서는 ``result_text``는 학생의 [단계 2] 실습 수행 결과(+ AI 평가)를 합친 텍스트이고,
+    ``guidance_text``는 [단계 1]에서 AI가 제시한 가이드(미션)이다.
+
+    가이드가 주어진 경우, '학생이 가이드를 얼마나 충실히 따라 수행했는지(faithfulness)'를 점수에 반영한다.
+
+    - 가이드에 포함 + 학생 결과에도 포함 → 만점 가중(가이드 충실 이행)
+    - 가이드에 포함 + 학생 결과 누락 → 0점(가이드 미이행, 보완 항목으로 표기)
+    - 가이드 미포함 + 학생 결과에 포함 → 70% 가중(가이드 외 자율 수행 부분 인정)
+    - 둘 다 미포함 → 0점
+
+    가이드가 없는 경우(옛 포맷, 단일 단계)는 기존 키워드 매칭 방식을 유지한다.
+    """
     weights = MODE_RUBRIC_WEIGHTS.get(mode, {})
-    lowered = result_text.lower()
+    has_guidance = bool(guidance_text and guidance_text.strip())
+    result_lower = (result_text or "").lower()
+    guidance_lower = (guidance_text or "").lower()
+
     unit_scores = []
     total_weighted_score = 0.0
     total_weighted_items = 0.0
     for unit in NCS_UNITS:
         criteria = NCS_RUBRIC[unit]
-        missing_labels = []
+        missing_labels: list[str] = []
         unit_weighted_score = 0.0
         unit_weight_total = 0.0
         for label, keywords in criteria:
             criterion_weight = weights.get(label, 1.0)
             unit_weight_total += criterion_weight
-            if any(keyword.lower() in lowered for keyword in keywords):
-                unit_weighted_score += criterion_weight
+            in_result = any(keyword.lower() in result_lower for keyword in keywords)
+            if has_guidance:
+                in_guidance = any(keyword.lower() in guidance_lower for keyword in keywords)
+                if in_guidance and in_result:
+                    unit_weighted_score += criterion_weight
+                elif in_guidance and not in_result:
+                    missing_labels.append(f"{label} (가이드 미이행)")
+                elif in_result:
+                    unit_weighted_score += criterion_weight * 0.7
+                else:
+                    missing_labels.append(label)
             else:
-                missing_labels.append(label)
+                if in_result:
+                    unit_weighted_score += criterion_weight
+                else:
+                    missing_labels.append(label)
         completion = unit_weighted_score / unit_weight_total if unit_weight_total else 0.0
+        completion = max(0.0, min(1.0, completion))
         unit_scores.append(
             {
                 "unit": unit,
@@ -571,7 +811,12 @@ def calculate_ncs_scores(result_text: str, mode: str) -> dict:
         total_weighted_score += unit_weighted_score
         total_weighted_items += unit_weight_total
     overall_rate = (total_weighted_score / total_weighted_items) * 100 if total_weighted_items else 0.0
-    return {"overall_rate": overall_rate, "unit_scores": unit_scores}
+    overall_rate = max(0.0, min(100.0, overall_rate))
+    return {
+        "overall_rate": overall_rate,
+        "unit_scores": unit_scores,
+        "guidance_aware": has_guidance,
+    }
 def build_pdf_bytes(
     generated_at: str,
     mode: str,
@@ -581,20 +826,10 @@ def build_pdf_bytes(
     subject: str,
     unit: str,
     student_id: str,
+    execution_result: str = "",
 ) -> bytes:
     if FPDF is None:
         raise RuntimeError("fpdf2 라이브러리가 필요합니다.")
-    parsed = split_sections(result_text)
-    sections = [
-        ("0) 학습 시작 질문", parsed.get("영역 0", "")),
-        ("1) 영역 1", parsed["영역 1"]),
-        ("2) 영역 2", parsed["영역 2"]),
-        ("3) 영역 3", parsed["영역 3"]),
-        ("4) 영역 4", parsed["영역 4"]),
-        ("5) 영역 5", parsed["영역 5"]),
-    ]
-    if mode != "학습 모드":
-        sections = [(t, b) for t, b in sections if not t.startswith("0)")]
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -619,19 +854,31 @@ def build_pdf_bytes(
     pdf.multi_cell(0, 8, "[입력 증상]")
     pdf.multi_cell(0, 8, symptom if symptom else "사진 기반 진단(텍스트 입력 없음)")
     pdf.ln(2)
-    pdf.multi_cell(0, 8, "[AI 피드백 영역]")
-    for title, body in sections:
-        pdf.multi_cell(0, 8, title)
-        pdf.multi_cell(0, 8, body if body else "응답 내용 없음")
-        pdf.ln(1)
+    guidance_text, evaluation_text = split_combined_result(result_text)
+    if not guidance_text and not evaluation_text and result_text:
+        evaluation_text = result_text
+    if guidance_text:
+        pdf.multi_cell(0, 8, "[단계 1 — AI 진단 가이드(미션)]")
+        pdf.multi_cell(0, 8, guidance_text)
+        pdf.ln(2)
+    if execution_result and execution_result.strip():
+        pdf.multi_cell(0, 8, "[단계 2 — 학생 실습 수행 결과]")
+        pdf.multi_cell(0, 8, execution_result.strip())
+        pdf.ln(2)
+    if evaluation_text:
+        pdf.multi_cell(0, 8, "[단계 2 — 실습 수행 평가]")
+        pdf.multi_cell(0, 8, evaluation_text)
+        pdf.ln(2)
     return bytes(pdf.output(dest="S"))
-def render_ncs_achievement(result_text: str, mode: str) -> None:
+def render_ncs_achievement(result_text: str, mode: str, guidance_text: str = "") -> None:
     st.markdown("#### NCS 능력단위 성취도 체크")
     if not result_text:
-        st.caption("아직 분석할 결과가 없습니다. 먼저 AI 피드백을 생성해 주세요.")
+        st.caption("아직 분석할 결과가 없습니다. 먼저 [단계 2] 실습 수행 결과를 제출해 주세요.")
         return
-    score_data = calculate_ncs_scores(result_text, mode)
+    score_data = calculate_ncs_scores(result_text, mode, guidance_text=guidance_text)
     unit_scores = score_data["unit_scores"]
+    if score_data.get("guidance_aware"):
+        st.caption("✅ AI 가이드 충실도 가중치가 반영된 성취도입니다 (가이드 이행=만점, 자율 수행=70%).")
     radar_labels = []
     radar_values = []
     ai_overview = []
@@ -787,10 +1034,21 @@ def get_diagnostic_records() -> list[dict]:
 
 
 def append_diagnostic_record(record: dict) -> None:
-    """진단 완료 시 history 시트에 append."""
+    """진단 완료 시 history 시트에 append.
+
+    신 포맷 result는 ``compose_combined_result`` 로 가이드+평가를 한 필드에 합쳐 저장한다.
+    NCS 점수 계산 시 가이드를 분리해 충실도 기반 가중치를 적용한다.
+    """
     if not gs_app_sheets_ready():
         raise RuntimeError("Google Sheets에 연결할 수 없습니다. secrets.toml [connections.gsheets] 를 확인하세요.")
-    ncs = calculate_ncs_scores(record.get("result") or "", record.get("mode") or "학습 모드")["overall_rate"]
+    combined = record.get("result") or ""
+    guidance_text, evaluation_text = split_combined_result(combined)
+    score_input_text = evaluation_text or combined
+    ncs = calculate_ncs_scores(
+        score_input_text,
+        record.get("mode") or "학습 모드",
+        guidance_text=guidance_text,
+    )["overall_rate"]
     shb.append_history_from_record(record, ncs)
 def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], list[float]]:
     if not records:
@@ -802,7 +1060,9 @@ def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], l
         mode = rec.get("mode") or "학습 모드"
         if not result.strip():
             continue
-        score_data = calculate_ncs_scores(result, mode)
+        guidance_text, evaluation_text = split_combined_result(result)
+        score_input_text = evaluation_text or result
+        score_data = calculate_ncs_scores(score_input_text, mode, guidance_text=guidance_text)
         for us in score_data["unit_scores"]:
             sums[us["unit"]] += us["completion"] * 100.0
             counts[us["unit"]] += 1
@@ -960,9 +1220,9 @@ def render_teacher_mode() -> None:
                 st.markdown("**입력 증상**")
                 st.write(current.get("symptom") or "(없음)")
                 if current.get("reasoning"):
-                    st.markdown("**학생 진단 논리**")
+                    st.markdown("**실습 수행 결과 / 진단 논리**")
                     st.write(current.get("reasoning"))
-                st.markdown("**AI 진단 피드백 (앞부분)**")
+                st.markdown("**AI 진단 피드백 (가이드+평가, 앞부분)**")
                 preview = (current.get("result") or "")[:2000]
                 st.text(preview + ("…" if len(current.get("result") or "") > 2000 else ""))
             fb_key = f"teacher_fb_draft_{current['record_id']}"
@@ -1133,6 +1393,306 @@ def render_student_login() -> None:
             st.rerun()
 
 
+_DIAG_STEPS = [
+    ("input", "1단계 · 진단 입력", "부품·증상·학습 질문을 입력합니다."),
+    ("guidance", "2단계 · AI 가이드 → 실습 결과", "AI 미션을 따라 실측한 결과를 입력합니다."),
+    ("result", "3단계 · 평가 & NCS 성취도", "충실도·NCS 정렬을 분석합니다."),
+]
+
+
+def _diag_step_index(step: str) -> int:
+    for idx, (key, _label, _desc) in enumerate(_DIAG_STEPS):
+        if key == step:
+            return idx
+    return 0
+
+
+def _render_diagnosis_progress(step: str) -> None:
+    """단계별 진행 상황 안내 + 진행 바."""
+    idx = _diag_step_index(step)
+    cols = st.columns(len(_DIAG_STEPS))
+    for col_idx, (key, label, desc) in enumerate(_DIAG_STEPS):
+        with cols[col_idx]:
+            if col_idx < idx:
+                st.markdown(f"**✅ {label}**")
+            elif col_idx == idx:
+                st.markdown(f"**🟦 {label}**")
+            else:
+                st.markdown(f":gray[⬜ {label}]")
+            st.caption(desc)
+    progress_value = (idx + 1) / len(_DIAG_STEPS)
+    st.progress(progress_value)
+    st.markdown("")
+
+
+def _render_diagnosis_input_tab(
+    mode: str,
+    api_key: str,
+    selected_subject: str,
+    selected_unit: str,
+) -> None:
+    """[단계 1] 입력 → AI 가이드 호출, [단계 2] 가이드 표시 + 실습 결과 입력 → 평가 호출."""
+    diag_step = st.session_state.get("diag_step", "input")
+
+    # ──────────────────── [단계 1] 입력 폼 ────────────────────
+    if diag_step == "input":
+        st.subheader("① 진단 입력")
+        st.caption("부품과 증상을 적은 뒤 [1단계: AI 가이드 받기]를 누르면, AI 튜터가 측정 미션을 안내해 줍니다.")
+        render_photo_upload_checklist(selected_unit)
+        hints = UNIT_INPUT_HINTS.get(
+            selected_unit,
+            {
+                "target": "예: 점검 중인 부품 이름을 적어 주세요",
+                "state": "예: 측정값/관찰한 증상을 적어 주세요",
+                "question": "예: 가장 헷갈리는 부분을 적어 주세요",
+            },
+        )
+        target_part = st.text_input(
+            "① 대상 부품 — 점검 중인 부품이 무엇인가요?",
+            placeholder=hints["target"],
+            key="diag_target_part",
+            help="회로도 상의 부품 이름이나 커넥터 번호를 함께 적으면 더 정확한 안내가 가능합니다.",
+        )
+        current_state = st.text_area(
+            "② 현재 상태 — 어떤 증상/측정값이 나타나나요?",
+            placeholder=hints["state"],
+            height=120,
+            key="diag_current_state",
+            help="멀티미터/스캐너로 측정한 값, 작동·미작동 상황, DTC 코드 등을 구체적으로 적어 주세요.",
+        )
+        learning_question = st.text_area(
+            "③ 학습 질문 — 가장 궁금하거나 해결하기 어려운 부분은 무엇인가요?",
+            placeholder=hints["question"],
+            height=100,
+            key="diag_learning_question",
+            help="AI 튜터가 이 질문을 우선 다뤄 힌트를 줍니다(정답을 바로 알려주지는 않아요).",
+        )
+        symptom_text = compose_structured_symptom(target_part, current_state, learning_question)
+        uploaded_image = st.file_uploader(
+            "부품/측정 사진 업로드 (선택)",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="diag_uploaded_image",
+        )
+        if uploaded_image is not None:
+            st.image(uploaded_image, caption="업로드된 사진", use_container_width=True)
+        run_step1 = st.button("🚀 1단계: AI 가이드 받기", type="primary", use_container_width=True)
+        if run_step1:
+            if genai is None:
+                st.error("Gemini 라이브러리가 설치되지 않았습니다. `pip install google-genai` 후 다시 실행해 주세요.")
+                return
+            if not api_key:
+                st.warning("Gemini API 키를 먼저 설정해 주세요. (배포: Streamlit Secrets / 로컬: 사이드바 입력)")
+                return
+            if not symptom_text.strip() and uploaded_image is None:
+                st.warning(
+                    "①대상 부품 / ②현재 상태 / ③학습 질문 중 하나 이상을 적거나, 부품 사진을 업로드해 주세요."
+                )
+                return
+            with st.spinner("AI 튜터가 NCS 기반 진단 미션을 작성 중입니다..."):
+                try:
+                    guidance_text = ask_gemini(
+                        mode=mode,
+                        user_symptom=symptom_text.strip(),
+                        student_reasoning="",
+                        image_file=uploaded_image,
+                        key=api_key,
+                        selected_subject=selected_subject,
+                        selected_unit=selected_unit,
+                        step="guidance",
+                    )
+                except Exception as exc:
+                    st.error(f"진단 가이드 요청 중 오류가 발생했습니다: {exc}")
+                    return
+            st.session_state.latest_guidance = guidance_text
+            st.session_state.latest_mode = mode
+            st.session_state.latest_symptom = symptom_text.strip()
+            st.session_state.latest_subject = selected_subject
+            st.session_state.latest_unit = selected_unit
+            st.session_state.latest_evaluation = ""
+            st.session_state.latest_execution_result = ""
+            st.session_state.latest_result = ""
+            st.session_state.diag_step = "guidance"
+            st.rerun()
+        return
+
+    # ──────────────────── [단계 2] 가이드 표시 + 실습 결과 입력 ────────────────────
+    if diag_step == "guidance":
+        st.subheader("② AI 가이드 확인 → 실습 수행")
+        st.success("✅ 1단계 완료! 아래 미션을 따라 실측한 뒤 결과를 입력하면, AI가 충실도와 NCS 정렬을 평가합니다.")
+        with st.expander("내가 입력한 증상 다시 보기", expanded=False):
+            st.code(st.session_state.get("latest_symptom") or "(미입력)")
+        st.markdown("---")
+        render_mission_card(st.session_state.get("latest_guidance", ""))
+        st.markdown("---")
+        st.markdown("#### 🧪 실습 수행 결과 입력")
+        st.caption(
+            "위 미션의 각 단계를 실제로 수행한 결과(측정값·관찰·판단)를 적어 주세요. "
+            "AI는 이 결과를 가이드와 비교해 충실도(★★★)와 NCS 수행준거 정렬을 평가합니다."
+        )
+        execution_result = st.text_area(
+            "실습 수행 결과",
+            placeholder=(
+                "예시)\n"
+                "• 안전 점검: 점화스위치 OFF, 절연장갑 착용 후 단자 보호 확인\n"
+                "• OCV 측정값: 12.45V (규정 12.3~12.9V 범위 내, 양호)\n"
+                "• 암전류 측정: 32mA (50mA 미만, 양호)\n"
+                "• 최종 판단: 배터리 자체는 정상, 시동 불량 원인은 솔레노이드 ST단자 전압강하로 추정"
+            ),
+            height=240,
+            key="diag_execution_result",
+        )
+        col_back, col_submit = st.columns([1, 2])
+        with col_back:
+            if st.button("← 1단계로 돌아가기"):
+                st.session_state.diag_step = "input"
+                st.rerun()
+        with col_submit:
+            run_step2 = st.button("✅ 2단계: 실습 결과 제출 & 평가받기", type="primary", use_container_width=True)
+        if run_step2:
+            if not execution_result.strip():
+                st.warning("실습 수행 결과를 한 줄 이상 입력해 주세요.")
+                return
+            if not api_key:
+                st.warning("Gemini API 키를 먼저 설정해 주세요.")
+                return
+            with st.spinner("AI 코치가 가이드 충실도와 NCS 정렬을 평가 중입니다..."):
+                try:
+                    evaluation_text = ask_gemini(
+                        mode=mode,
+                        user_symptom=st.session_state.get("latest_symptom") or "",
+                        student_reasoning=execution_result.strip(),
+                        image_file=None,
+                        key=api_key,
+                        selected_subject=st.session_state.get("latest_subject") or selected_subject,
+                        selected_unit=st.session_state.get("latest_unit") or selected_unit,
+                        step="evaluation",
+                        guidance_text=st.session_state.get("latest_guidance", ""),
+                    )
+                except Exception as exc:
+                    st.error(f"평가 요청 중 오류가 발생했습니다: {exc}")
+                    return
+            generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            combined_result = compose_combined_result(
+                st.session_state.get("latest_guidance", ""),
+                evaluation_text,
+            )
+            st.session_state.latest_evaluation = evaluation_text
+            st.session_state.latest_execution_result = execution_result.strip()
+            st.session_state.latest_result = combined_result
+            st.session_state.latest_mode = mode
+            st.session_state.latest_generated_at = generated_at
+            st.session_state.diag_step = "result"
+            record = {
+                "record_id": str(uuid.uuid4()),
+                "submitted_at": generated_at,
+                "student_id": st.session_state.student_id,
+                "student_display_name": st.session_state.get("student_display_name")
+                or st.session_state.student_id,
+                "subject": st.session_state.get("latest_subject") or selected_subject,
+                "unit": st.session_state.get("latest_unit") or selected_unit,
+                "mode": mode,
+                "symptom": st.session_state.get("latest_symptom") or "",
+                "reasoning": execution_result.strip(),
+                "result": combined_result,
+                "teacher_feedback": "",
+                "teacher_feedback_updated_at": "",
+            }
+            try:
+                append_diagnostic_record(record)
+                shb.invalidate_all_sheet_caches()
+                st.success("실습 평가가 완료되어 history 시트에 저장되었습니다. [AI 피드백] · [NCS 성취도 분석] 탭에서 확인하세요.")
+            except Exception as sheet_exc:
+                st.warning(f"평가는 생성되었으나 Google Sheets 저장에 실패했습니다: {sheet_exc}")
+            st.rerun()
+        return
+
+    # ──────────────────── [단계 3] 결과 표시 / 새 진단 ────────────────────
+    st.subheader("③ 진단 완료")
+    st.success("🎉 모든 단계가 완료되었습니다. 결과는 [AI 피드백] · [NCS 성취도 분석] 탭에서 확인하세요.")
+    with st.expander("이번 진단 입력 요약", expanded=False):
+        st.code(st.session_state.get("latest_symptom") or "(미입력)")
+        if st.session_state.get("latest_execution_result"):
+            st.markdown("**실습 수행 결과**")
+            st.code(st.session_state.get("latest_execution_result", ""))
+    if st.button("🔄 새 진단 시작하기", type="primary", use_container_width=True):
+        reset_diagnosis_flow()
+        st.rerun()
+
+
+def _render_diagnosis_feedback_tab() -> None:
+    """AI 피드백 탭: 단계별로 가이드/평가 카드를 보여주고, 완료 시 PDF 다운로드를 제공한다."""
+    st.subheader("AI 진단 피드백")
+    diag_step = st.session_state.get("diag_step", "input")
+    guidance_text = st.session_state.get("latest_guidance", "")
+    evaluation_text = st.session_state.get("latest_evaluation", "")
+    if diag_step == "input" and not guidance_text:
+        st.caption("아직 생성된 피드백이 없습니다. [진단 입력] 탭에서 1단계를 먼저 진행해 주세요.")
+        return
+    st.caption(
+        f"교과: {st.session_state.get('latest_subject', '')} | 단원: {st.session_state.get('latest_unit', '')} | 모드: {st.session_state.get('latest_mode', '')}"
+    )
+    if guidance_text:
+        render_photo_retake_notice(guidance_text)
+        render_mission_card(guidance_text)
+    if diag_step == "guidance" and not evaluation_text:
+        st.info("📌 [단계 2] 실습 수행 결과를 [진단 입력] 탭에서 제출하면 평가가 이 카드 아래에 추가됩니다.")
+    if evaluation_text:
+        st.markdown("---")
+        render_evaluation_card(evaluation_text)
+    if evaluation_text:
+        st.markdown("---")
+        st.markdown("#### 포트폴리오 — 진단 결과 PDF 저장")
+        if FPDF is None:
+            st.info("PDF 저장 기능을 사용하려면 `pip install fpdf2`를 실행해 주세요.")
+            return
+        try:
+            ncs_data = calculate_ncs_scores(
+                st.session_state.get("latest_evaluation", "") or st.session_state.get("latest_execution_result", ""),
+                st.session_state.get("latest_mode", "학습 모드"),
+                guidance_text=st.session_state.get("latest_guidance", ""),
+            )
+            pdf_bytes = build_pdf_bytes(
+                generated_at=st.session_state.get("latest_generated_at")
+                or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                mode=st.session_state.get("latest_mode", "학습 모드"),
+                symptom=st.session_state.get("latest_symptom", ""),
+                result_text=st.session_state.get("latest_result", ""),
+                ncs_score=ncs_data["overall_rate"],
+                subject=st.session_state.get("latest_subject") or "",
+                unit=st.session_state.get("latest_unit") or "",
+                student_id=st.session_state.get("student_id") or "",
+                execution_result=st.session_state.get("latest_execution_result", ""),
+            )
+            st.download_button(
+                "진단 결과 PDF로 저장하기",
+                data=pdf_bytes,
+                file_name=f"portfolio_{st.session_state.get('student_id', 'student')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        except Exception as exc:
+            st.error(f"PDF 생성 중 오류가 발생했습니다: {exc}")
+
+
+def _render_diagnosis_ncs_tab() -> None:
+    """NCS 성취도 탭: [단계 2] 결과 입력이 끝난 뒤에만 분석/레이더를 보여 준다."""
+    st.subheader("NCS 성취도 분석")
+    diag_step = st.session_state.get("diag_step", "input")
+    if diag_step != "result":
+        st.info(
+            "📊 NCS 성취도 분석은 **[단계 2] 실습 수행 결과** 제출이 끝난 뒤에 생성됩니다.\n\n"
+            "• 1단계: 부품·증상 입력 → AI 가이드 받기\n"
+            "• 2단계: 가이드를 따라 측정·판단 → 결과 입력 후 제출\n"
+            "• 3단계: 여기에서 NCS 성취도 레이더와 가이드 충실도 분석을 확인할 수 있어요."
+        )
+        return
+    render_ncs_achievement(
+        st.session_state.get("latest_evaluation", "") or st.session_state.get("latest_execution_result", ""),
+        st.session_state.get("latest_mode", "학습 모드"),
+        guidance_text=st.session_state.get("latest_guidance", ""),
+    )
+
+
 def render_student_mode() -> None:
     sname = (st.session_state.get("student_display_name") or "").strip() or "학생"
     st.success(f"안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
@@ -1160,149 +1720,19 @@ def render_student_mode() -> None:
     unit_choices = CURRICULUM[selected_subject]
     selected_unit = st.selectbox("단원 선택", unit_choices, index=0)
     st.info(f"교과: **{selected_subject}** → 단원: **{selected_unit}**")
+    _render_diagnosis_progress(st.session_state.get("diag_step", "input"))
     tab_input, tab_feedback, tab_ncs = st.tabs(["진단 입력", "AI 피드백", "NCS 성취도 분석"])
     with tab_input:
-        st.subheader("고장 진단 입력")
-        render_photo_upload_checklist(selected_unit)
-        hints = UNIT_INPUT_HINTS.get(
-            selected_unit,
-            {
-                "target": "예: 점검 중인 부품 이름을 적어 주세요",
-                "state": "예: 측정값/관찰한 증상을 적어 주세요",
-                "question": "예: 가장 헷갈리는 부분을 적어 주세요",
-            },
+        _render_diagnosis_input_tab(
+            mode=mode,
+            api_key=api_key,
+            selected_subject=selected_subject,
+            selected_unit=selected_unit,
         )
-        st.caption(
-            "고장 증상을 세 단계로 나눠 적어 주세요. AI 튜터는 특히 [학습 질문]에 우선 답변합니다."
-        )
-        target_part = st.text_input(
-            "① 대상 부품 — 점검 중인 부품이 무엇인가요?",
-            placeholder=hints["target"],
-            help="회로도 상의 부품 이름이나 커넥터 번호를 함께 적으면 더 정확한 안내가 가능합니다.",
-        )
-        current_state = st.text_area(
-            "② 현재 상태 — 어떤 증상/측정값이 나타나나요?",
-            placeholder=hints["state"],
-            height=120,
-            help="멀티미터/스캐너로 측정한 값, 작동·미작동 상황, DTC 코드 등을 구체적으로 적어 주세요.",
-        )
-        learning_question = st.text_area(
-            "③ 학습 질문 — 가장 궁금하거나 해결하기 어려운 부분은 무엇인가요?",
-            placeholder=hints["question"],
-            height=100,
-            help="AI 튜터가 이 질문에 우선적으로 힌트를 줍니다. (정답을 바로 알려주지는 않아요)",
-        )
-        symptom_text = compose_structured_symptom(target_part, current_state, learning_question)
-        student_reasoning = ""
-        if mode == "평가 모드":
-            student_reasoning = st.text_area(
-                "학생 진단 논리 설명(평가 모드 필수)",
-                placeholder="예: 배터리 전압 강하를 의심하여 발전기 출력과 접지 저항을 먼저 점검했습니다...",
-                height=160,
-            )
-        uploaded_image = st.file_uploader(
-            "멀티미터 측정 사진 업로드",
-            type=["png", "jpg", "jpeg", "webp"],
-        )
-        if uploaded_image is not None:
-            st.image(uploaded_image, caption="업로드된 멀티미터 측정 사진", use_container_width=True)
-        run_diagnosis = st.button("AI 진단 피드백 생성", type="primary")
-        if run_diagnosis:
-            if genai is None:
-                st.error("Gemini 라이브러리가 설치되지 않았습니다. `pip install google-genai` 후 다시 실행해 주세요.")
-            elif not api_key:
-                st.warning("Gemini API 키를 먼저 설정해 주세요. (배포: Streamlit Secrets / 로컬: 사이드바 입력)")
-            elif not symptom_text.strip() and uploaded_image is None:
-                st.warning(
-                    "①대상 부품 / ②현재 상태 / ③학습 질문 중 하나 이상을 적거나, 부품 사진을 업로드해 주세요."
-                )
-            elif mode == "평가 모드" and not student_reasoning.strip():
-                st.warning("평가 모드에서는 학생 진단 논리 설명을 입력해 주세요.")
-            else:
-                with st.spinner("AI 튜터가 NCS 기준 피드백을 작성 중입니다..."):
-                    try:
-                        result_text = ask_gemini(
-                            mode=mode,
-                            user_symptom=symptom_text.strip(),
-                            student_reasoning=student_reasoning.strip(),
-                            image_file=uploaded_image,
-                            key=api_key,
-                            selected_subject=selected_subject,
-                            selected_unit=selected_unit,
-                        )
-                        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        st.session_state.latest_result = result_text
-                        st.session_state.latest_mode = mode
-                        st.session_state.latest_symptom = symptom_text.strip()
-                        st.session_state.latest_generated_at = generated_at
-                        st.session_state.latest_subject = selected_subject
-                        st.session_state.latest_unit = selected_unit
-                        record = {
-                            "record_id": str(uuid.uuid4()),
-                            "submitted_at": generated_at,
-                            "student_id": st.session_state.student_id,
-                            "student_display_name": st.session_state.get("student_display_name")
-                            or st.session_state.student_id,
-                            "subject": selected_subject,
-                            "unit": selected_unit,
-                            "mode": mode,
-                            "symptom": symptom_text.strip(),
-                            "reasoning": student_reasoning.strip(),
-                            "result": result_text,
-                            "teacher_feedback": "",
-                            "teacher_feedback_updated_at": "",
-                        }
-                        try:
-                            append_diagnostic_record(record)
-                            shb.invalidate_all_sheet_caches()
-                            st.success(
-                                "AI 피드백이 생성되었고 history 시트에 저장되었습니다. [AI 피드백] 탭에서 확인해 보세요."
-                            )
-                        except Exception as sheet_exc:
-                            st.warning(f"AI 피드백은 생성되었으나 Google Sheets 저장에 실패했습니다: {sheet_exc}")
-                    except Exception as exc:
-                        st.error(f"진단 요청 중 오류가 발생했습니다: {exc}")
     with tab_feedback:
-        st.subheader("AI 진단 피드백")
-        if st.session_state.latest_result:
-            st.caption(
-                f"교과: {st.session_state.get('latest_subject', '')} | 단원: {st.session_state.get('latest_unit', '')} | 모드: {st.session_state.latest_mode}"
-            )
-            st.caption(f"현재 결과 모드: {st.session_state.latest_mode}")
-            render_photo_retake_notice(st.session_state.latest_result)
-            render_feedback_cards(st.session_state.latest_result, st.session_state.latest_mode)
-            st.markdown("---")
-            st.markdown("#### 포트폴리오 — 진단 결과 PDF 저장")
-            if FPDF is None:
-                st.info("PDF 저장 기능을 사용하려면 `pip install fpdf2`를 실행해 주세요.")
-            else:
-                try:
-                    ncs_data = calculate_ncs_scores(st.session_state.latest_result, st.session_state.latest_mode)
-                    pdf_bytes = build_pdf_bytes(
-                        generated_at=st.session_state.latest_generated_at
-                        or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        mode=st.session_state.latest_mode,
-                        symptom=st.session_state.latest_symptom,
-                        result_text=st.session_state.latest_result,
-                        ncs_score=ncs_data["overall_rate"],
-                        subject=st.session_state.get("latest_subject") or "",
-                        unit=st.session_state.get("latest_unit") or "",
-                        student_id=st.session_state.get("student_id") or "",
-                    )
-                    st.download_button(
-                        "진단 결과 PDF로 저장하기",
-                        data=pdf_bytes,
-                        file_name=f"portfolio_{st.session_state.get('student_id', 'student')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                    )
-                except Exception as exc:
-                    st.error(f"PDF 생성 중 오류가 발생했습니다: {exc}")
-        else:
-            st.caption("아직 생성된 피드백이 없습니다. [진단 입력] 탭에서 먼저 실행해 주세요.")
+        _render_diagnosis_feedback_tab()
     with tab_ncs:
-        st.subheader("NCS 성취도 분석")
-        render_ncs_achievement(st.session_state.latest_result, st.session_state.latest_mode)
+        _render_diagnosis_ncs_tab()
     st.markdown("### 나의 진단 이력")
     mine = [r for r in get_diagnostic_records() if r.get("student_id") == st.session_state.get("student_id")]
     if mine:
@@ -1314,12 +1744,12 @@ def render_student_mode() -> None:
                 st.markdown("**입력 증상**")
                 st.write(item["symptom"])
                 if item.get("reasoning"):
-                    st.markdown("**학생 진단 논리**")
+                    st.markdown("**실습 수행 결과 / 진단 논리**")
                     st.write(item["reasoning"])
                 if (item.get("teacher_feedback") or "").strip():
                     st.markdown("**교사 피드백**")
                     st.success(item["teacher_feedback"])
-                st.markdown("**AI 진단 피드백**")
+                st.markdown("**AI 진단 피드백 (가이드 + 평가)**")
                 render_feedback_cards(item["result"], item["mode"])
     else:
         st.caption("이 계정으로 저장된 진단 이력이 없습니다.")
@@ -1336,6 +1766,10 @@ def init_session_state() -> None:
         "latest_unit": "",
         "student_id": "",
         "student_display_name": "",
+        "diag_step": "input",
+        "latest_guidance": "",
+        "latest_evaluation": "",
+        "latest_execution_result": "",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
