@@ -131,6 +131,78 @@ MODE_RUBRIC_WEIGHTS = {
         "게이트웨이/모듈 진단": 1.2,
     },
 }
+# 단원별 촬영 전 체크리스트 — PDF 실습 지침에서 학생들이 자주 놓치는 포인트를 발췌하여 구어체로 재작성
+UNIT_PHOTO_CHECKLISTS = {
+    "자동차 전기전자장치 고장진단": [
+        "회로도 분석에 필요한 커넥터 핀 번호 라벨이 사진에 잘 보이나요?",
+        "측정 중인 멀티미터 모드(DC V / Ω / 통전)가 화면에 또렷이 찍혔나요?",
+        "리드봉이 점검 단자(VΩmA / COM)에 정확히 닿아 있는 모습이 보이나요?",
+        "단선·단락·접지가 의심되는 배선 구간이 한 컷에 같이 담겼나요?",
+    ],
+    "배터리 점검": [
+        "(＋)/(－) 터미널 부식·황화 상태가 잘 보이게 찍었나요?",
+        "배터리 라벨(CCA, RC, AGM/EFB/MF 표기)이 또렷이 찍혔나요?",
+        "배터리 표시창(매직아이)의 색상이 선명하게 나오나요?",
+        "DC V 측정 시 단자 양쪽에 리드봉이 닿은 모습과 측정 전압이 함께 보이나요?",
+    ],
+    "시동·충전장치 점검": [
+        "솔레노이드 B/ST/M 단자 위치가 한 컷에 모두 보이나요?",
+        "발전기 B단자·FR단자·C단자 커넥터와 케이블 굵기를 알 수 있게 찍었나요?",
+        "시동 ON 또는 크랭킹 시점의 측정값(전압/전류)이 화면에 함께 나오나요?",
+        "벨트장력·풀리(OAD 포함) 상태가 잘 드러나는 각도인가요?",
+    ],
+    "조명장치 점검": [
+        "전조등/미등/방향지시등 등 점검 중인 등화의 종류를 알 수 있는 사진인가요?",
+        "회로도 상의 배선 색상과 실제 배선 색상이 일치하게 보이나요?",
+        "멀티미터 리드봉이 커넥터 핀(또는 소켓 단자)에 정확히 닿아 있나요?",
+        "퓨즈/릴레이 박스의 해당 칸 표기와 부품 위치가 함께 찍혔나요?",
+    ],
+    "편의장치 점검": [
+        "BCM/ETACS 모듈 또는 다기능 스위치의 커넥터 핀 번호가 잘 보이나요?",
+        "릴레이 30/87/85/86 단자 식별이 가능한 각도로 촬영했나요?",
+        "스캐너 화면에 DTC 코드와 차량 모델 정보가 함께 캡처됐나요?",
+        "와이퍼·도어록·파워윈도우 등 점검 대상 액추에이터의 위치가 식별되나요?",
+    ],
+    "네트워크 장치 점검": [
+        "DLC 커넥터에 스캐너 케이블이 연결된 모습이 보이나요?",
+        "C-CAN/B-CAN 주선의 트위스트 페어 배선과 종단저항 위치가 함께 찍혔나요?",
+        "오실로스코프 파형의 시간축·전압축 설정이 화면에 또렷이 나오나요?",
+        "스캐너의 통신 가능/불가 ECU 목록 또는 bus-off/time-out 메시지가 보이나요?",
+    ],
+}
+# 단원별 [대상 부품/현재 상태/학습 질문] 입력 예시 — placeholder 가이드용
+UNIT_INPUT_HINTS = {
+    "자동차 전기전자장치 고장진단": {
+        "target": "예: 운전석 도어 커넥터 E12, 미등 회로 퓨즈",
+        "state": "예: 멀티미터로 단자 전압을 측정하니 0V가 나옴, 통전 부저가 울리지 않음",
+        "question": "예: 단선 위치를 어떻게 좁혀가야 하는지 점검 순서가 헷갈려요",
+    },
+    "배터리 점검": {
+        "target": "예: 12V 납축전지(MF), 배터리 센서, B+ 케이블",
+        "state": "예: OCV 12.0V 측정, 시동 시 크랭킹 약함, 매직아이 색이 어두움",
+        "question": "예: OCV 12.0V는 정상인가요? CCA·SOC 중 무엇을 먼저 확인해야 하나요?",
+    },
+    "시동·충전장치 점검": {
+        "target": "예: 알터네이터 B단자, 시동 솔레노이드, 시동 릴레이",
+        "state": "예: 공회전 시 충전 전압 13.2V로 낮음, 크랭킹은 되는데 잘 안 걸림",
+        "question": "예: 13.2V면 발전기 불량인지 전압강하 문제인지 어떻게 구분하나요?",
+    },
+    "조명장치 점검": {
+        "target": "예: 좌측 전조등(로우빔), 방향지시등 플래셔, 미등 릴레이",
+        "state": "예: 좌측 로우빔만 점등 안 됨, 우측은 정상, 퓨즈는 도통됨",
+        "question": "예: 전구·소켓·접지 중 무엇부터 점검해야 효율적인가요?",
+    },
+    "편의장치 점검": {
+        "target": "예: 운전석 파워윈도우 모터, 와이퍼 릴레이, BCM",
+        "state": "예: AUTO 작동 안 됨, 수동 UP은 됨, 스캐너에 B1234 DTC 표시",
+        "question": "예: 강제구동으로 단품을 먼저 봐야 할지, 입력 신호부터 봐야 할지 모르겠어요",
+    },
+    "네트워크 장치 점검": {
+        "target": "예: C-CAN 주선, ABS 모듈, 게이트웨이",
+        "state": "예: 스캐너에서 ABS 모듈만 통신 불가, 다른 ECU는 정상",
+        "question": "예: 종단저항·주선 단선 중 어디부터 측정해야 하나요? 120Ω 기준은요?",
+    },
+}
 GEMINI_MODEL_CANDIDATES = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
@@ -176,6 +248,27 @@ def reset_student_session_soft() -> None:
     reset_student_auth_form()
     st.session_state.student_id = ""
     st.session_state.student_display_name = ""
+def compose_structured_symptom(target_part: str, current_state: str, learning_question: str) -> str:
+    """학생의 [대상 부품/현재 상태/학습 질문] 입력을 AI가 인지 가능한 구조화된 블록으로 합친다.
+
+    - 모든 필드가 비어 있으면 빈 문자열을 반환한다(기존 호출부의 '사진만 업로드' 대응 유지).
+    - 학습 질문은 비어 있더라도 라벨은 남겨 AI가 우선 응답할 영역을 명확히 인지하도록 한다.
+    """
+    target = (target_part or "").strip()
+    state = (current_state or "").strip()
+    question = (learning_question or "").strip()
+    if not (target or state or question):
+        return ""
+    return (
+        "[대상 부품]\n"
+        f"{target or '(미입력)'}\n"
+        "[현재 상태]\n"
+        f"{state or '(미입력)'}\n"
+        "[학습 질문 — 우선 응답 요청]\n"
+        f"{question or '(미입력)'}"
+    )
+
+
 def _rubric_lines_for_unit(unit: str) -> str:
     lines = NCS_RUBRIC.get(unit, [])
     if not lines:
@@ -234,6 +327,10 @@ def build_learning_prompt(
 - 친절하고 교육적인 어조
 - 정답을 바로 단정하지 말고 힌트와 소크라테스식 질문 포함
 - 감전·단락·배터리 단자 안전 등 전기전자 작업의 안전 점검을 최우선으로 강조하고, 위 [표준 절차]의 "가. 멀티미터 사용 전 안전 점검"과 "나. 회로도 분석 순서"를 답변 흐름에 자연스럽게 녹여낸다.
+- [학생 입력 증상]은 가능하면 **[대상 부품] / [현재 상태] / [학습 질문 — 우선 응답 요청]** 세 블록으로 구조화되어 들어온다.
+  · [대상 부품]: 학생이 점검 중인 실제 부품을 가리키는 핵심 단서. 회로도 상 위치를 함께 짚어 준다.
+  · [현재 상태]: 학생이 관찰·측정한 결과. 규정값 범위와 비교해 정상/이상 여부를 우선 판단해 준다.
+  · [학습 질문]: 학생이 가장 궁금해하거나 막혀 있는 지점. **이 질문이 비어 있지 않다면 0)~5) 어느 항목이든 답변 안에서 반드시 명시적으로 다루며**, 학습 질문에 대한 힌트·소크라테스식 되짚기를 우선 배치한다. 단, 정답을 곧장 단정하지 말고 학생이 스스로 결론에 닿도록 유도한다.
 - 반드시 위 [선택 단원]의 기술적 특성(예: 배터리 점검이면 OCV·CCA·SOC·암전류 50mA, 시동·충전이면 솔레노이드 B/ST/M단자·발전기 13.8~14.9V·전압강하 0.2V, 조명이면 등화회로·플래셔·BCM/IPS·B-CAN, 편의장치면 BCM·ETACS·릴레이 85/86/30/87, 네트워크면 CAN/LIN·종단저항 120Ω·bus-off/time-out)을 우선적으로 다룰 것
 - 위 [이 단원의 수행준거 요약]에 제시된 키워드 예시는 가능한 한 실제 답변에 자연스럽게 포함시켜 학생이 NCS 수행준거 용어에 익숙해지도록 유도한다.
 - 단원과 무관한 일반론 위주의 답변은 피하고, 해당 단원의 NCS 수행준거에 정렬된 질문/힌트를 제시
@@ -278,6 +375,9 @@ def build_evaluation_prompt(
 - 부족한 점은 "보완이 필요한 능력 단위 요소" 중심으로 제시
 - 평가 근거와 피드백은 반드시 [선택 단원]의 기술적 특성과 위 [이 단원의 수행준거 요약]에 명시된 키워드(예: OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 직접 인용하며 구체화
 - 학생 진단 논리 안에서 위 [표준 절차]의 (가) 안전 점검, (나) 회로도 분석 순서, (다) 시험등 vs 디지털 멀티미터 사용 기준, (라) 스캐너 사용 절차(DTC→센서 데이터→강제구동)가 어느 정도 지켜졌는지 명확히 짚어 평가한다.
+- [학생 입력 증상]은 가능하면 **[대상 부품] / [현재 상태] / [학습 질문 — 우선 응답 요청]** 세 블록으로 구조화되어 들어온다.
+  · [대상 부품]·[현재 상태]는 평가 시 부품 식별 정합성과 측정값 해석의 적정성을 판단하는 1차 근거로 사용한다.
+  · [학습 질문]이 비어 있지 않다면 항목 2)와 4) 안에서 **그 질문에 대한 명확한 가이드**를 반드시 제시하고, 학생이 어느 수행준거에서 막혀 있는지 진단해 보완 방향을 알려준다.
 - 개선을 위한 구체적 실습 제안 포함(해당 단원에서 학생이 다음에 수행할 측정/진단 과제 형태, 규정값 범위와 측정 포인트 명시)
 - 사진만 있는 경우 먼저 부품 명칭을 추정하고 평가 근거를 설명
 - 부품 식별 신뢰도가 낮으면 우선 평가를 단정하지 말고 "추가 사진 필요"를 먼저 제시
@@ -427,17 +527,20 @@ def render_photo_retake_notice(result_text: str) -> None:
             "사진 식별 신뢰도가 낮은 것으로 판단되었습니다. "
             "정면/측면/후면, 근접/중간 거리, 커넥터/라벨/배선이 보이도록 다시 촬영해 업로드해 주세요."
         )
-def render_photo_upload_checklist() -> None:
+def render_photo_upload_checklist(selected_unit: Optional[str] = None) -> None:
+    common_items = [
+        "정면, 측면, 후면 사진을 각각 1장 이상 촬영했나요?",
+        "부품 전체가 보이는 중간 거리 사진과 커넥터/라벨이 보이는 근접 사진이 있나요?",
+        "그림자/역광이 심하지 않고, 손떨림 없이 초점이 맞았나요?",
+        "가능하면 부품 주변 위치(엔진룸 내 상대 위치)도 함께 보이게 촬영했나요?",
+    ]
+    unit_items = UNIT_PHOTO_CHECKLISTS.get(selected_unit or "", [])
     with st.expander("촬영 전 체크리스트 (권장)", expanded=True):
-        st.markdown(
-            """
-- 정면, 측면, 후면 사진을 각각 1장 이상 촬영했나요?
-- 부품 전체가 보이는 중간 거리 사진과 커넥터/라벨이 보이는 근접 사진이 있나요?
-- 커넥터 핀, 배선 색상, 단자 부식 여부가 흐리지 않게 보이나요?
-- 그림자/역광이 심하지 않고, 손떨림 없이 초점이 맞았나요?
-- 가능하면 부품 주변 위치(엔진룸 내 상대 위치)도 함께 보이게 촬영했나요?
-            """.strip()
-        )
+        st.markdown("**공통 체크리스트**")
+        st.markdown("\n".join(f"- {item}" for item in common_items))
+        if unit_items:
+            st.markdown(f"**[{selected_unit}] 단원별 체크리스트**")
+            st.markdown("\n".join(f"- {item}" for item in unit_items))
         st.caption("체크리스트를 만족할수록 부품 식별 신뢰도와 측정 안내 정확도가 올라갑니다.")
 def calculate_ncs_scores(result_text: str, mode: str) -> dict:
     weights = MODE_RUBRIC_WEIGHTS.get(mode, {})
@@ -1060,12 +1163,36 @@ def render_student_mode() -> None:
     tab_input, tab_feedback, tab_ncs = st.tabs(["진단 입력", "AI 피드백", "NCS 성취도 분석"])
     with tab_input:
         st.subheader("고장 진단 입력")
-        render_photo_upload_checklist()
-        symptom_text = st.text_area(
-            "고장 증상을 입력하세요",
-            placeholder="예: 시동은 걸리지만 계기판 경고등이 점등되고, 전조등 밝기가 불안정합니다.",
-            height=180,
+        render_photo_upload_checklist(selected_unit)
+        hints = UNIT_INPUT_HINTS.get(
+            selected_unit,
+            {
+                "target": "예: 점검 중인 부품 이름을 적어 주세요",
+                "state": "예: 측정값/관찰한 증상을 적어 주세요",
+                "question": "예: 가장 헷갈리는 부분을 적어 주세요",
+            },
         )
+        st.caption(
+            "고장 증상을 세 단계로 나눠 적어 주세요. AI 튜터는 특히 [학습 질문]에 우선 답변합니다."
+        )
+        target_part = st.text_input(
+            "① 대상 부품 — 점검 중인 부품이 무엇인가요?",
+            placeholder=hints["target"],
+            help="회로도 상의 부품 이름이나 커넥터 번호를 함께 적으면 더 정확한 안내가 가능합니다.",
+        )
+        current_state = st.text_area(
+            "② 현재 상태 — 어떤 증상/측정값이 나타나나요?",
+            placeholder=hints["state"],
+            height=120,
+            help="멀티미터/스캐너로 측정한 값, 작동·미작동 상황, DTC 코드 등을 구체적으로 적어 주세요.",
+        )
+        learning_question = st.text_area(
+            "③ 학습 질문 — 가장 궁금하거나 해결하기 어려운 부분은 무엇인가요?",
+            placeholder=hints["question"],
+            height=100,
+            help="AI 튜터가 이 질문에 우선적으로 힌트를 줍니다. (정답을 바로 알려주지는 않아요)",
+        )
+        symptom_text = compose_structured_symptom(target_part, current_state, learning_question)
         student_reasoning = ""
         if mode == "평가 모드":
             student_reasoning = st.text_area(
@@ -1086,7 +1213,9 @@ def render_student_mode() -> None:
             elif not api_key:
                 st.warning("Gemini API 키를 먼저 설정해 주세요. (배포: Streamlit Secrets / 로컬: 사이드바 입력)")
             elif not symptom_text.strip() and uploaded_image is None:
-                st.warning("고장 증상 또는 부품 사진 중 하나 이상을 입력해 주세요.")
+                st.warning(
+                    "①대상 부품 / ②현재 상태 / ③학습 질문 중 하나 이상을 적거나, 부품 사진을 업로드해 주세요."
+                )
             elif mode == "평가 모드" and not student_reasoning.strip():
                 st.warning("평가 모드에서는 학생 진단 논리 설명을 입력해 주세요.")
             else:
