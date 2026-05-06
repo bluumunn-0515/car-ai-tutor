@@ -1790,21 +1790,52 @@ def render_student_mode() -> None:
     st.markdown("### 나의 진단 이력")
     mine = [r for r in get_diagnostic_records() if r.get("student_id") == st.session_state.get("student_id")]
     if mine:
-        for idx, item in enumerate(reversed(mine), start=1):
-            history_title = item["symptom"][:30] if item["symptom"] else "사진 기반 진단"
-            with st.expander(f"이력 {idx} - {item['mode']} - {item.get('unit', '')} - {history_title}..."):
-                st.markdown("**교과·단원**")
-                st.write(f"{item.get('subject')} → {item.get('unit')}")
-                st.markdown("**입력 증상**")
-                st.write(item["symptom"])
-                if item.get("reasoning"):
-                    st.markdown("**실습 수행 결과 / 진단 논리**")
-                    st.write(item["reasoning"])
+        for item in reversed(mine):
+            combined_result = item.get("result") or ""
+            guidance_text, evaluation_text = split_combined_result(combined_result)
+            score_input_text = evaluation_text or combined_result
+            try:
+                ncs = calculate_ncs_scores(
+                    score_input_text,
+                    item.get("mode") or "학습 모드",
+                    guidance_text=guidance_text,
+                )
+                overall_rate = ncs.get("overall_rate", 0.0)
+            except Exception:
+                overall_rate = 0.0
+            submitted_at = item.get("submitted_at") or "-"
+            unit_name = item.get("unit") or "-"
+            title = f"📅 {submitted_at} | {unit_name} | 성취도 {overall_rate:.1f}%"
+            with st.expander(title):
+                st.markdown("**🧭 AI 가이드 요약**")
+                if guidance_text.strip():
+                    summary_src = guidance_text.strip()
+                    summary_preview = summary_src[:300] + ("…" if len(summary_src) > 300 else "")
+                    st.markdown(summary_preview)
+                else:
+                    st.caption("저장된 AI 가이드 텍스트가 없습니다.")
+                st.markdown("**🗒 교사 피드백**")
                 if (item.get("teacher_feedback") or "").strip():
-                    st.markdown("**교사 피드백**")
-                    st.success(item["teacher_feedback"])
-                st.markdown("**AI 진단 피드백 (가이드 + 평가)**")
-                render_feedback_cards(item["result"], item["mode"])
+                    st.success("교사 피드백이 등록되어 있습니다. [상세 보기]에서 전체 내용을 확인할 수 있어요.")
+                else:
+                    st.caption("아직 교사 피드백이 없습니다.")
+                if st.button(
+                    "🔎 상세 보기",
+                    key=f"history_detail_{item.get('record_id', submitted_at)}",
+                    use_container_width=True,
+                ):
+                    st.session_state.latest_result = combined_result
+                    st.session_state.latest_guidance = guidance_text
+                    st.session_state.latest_evaluation = evaluation_text
+                    st.session_state.latest_execution_result = item.get("reasoning") or ""
+                    st.session_state.latest_symptom = item.get("symptom") or ""
+                    st.session_state.latest_subject = item.get("subject") or ""
+                    st.session_state.latest_unit = item.get("unit") or ""
+                    st.session_state.latest_mode = item.get("mode") or "학습 모드"
+                    st.session_state.latest_generated_at = submitted_at
+                    st.session_state.diag_step = "result"
+                    st.toast("이전 진단 이력을 불러왔어요. [AI 피드백] 탭에서 확인하세요.", icon="📂")
+                    st.rerun()
     else:
         st.caption("이 계정으로 저장된 진단 이력이 없습니다.")
 
