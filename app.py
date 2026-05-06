@@ -208,7 +208,7 @@ GEMINI_MODEL_CANDIDATES = [
     "gemini-2.0-flash",
     "gemini-1.5-flash",
 ]
-GEMINI_RETRY_DELAYS_SECONDS = [1.5, 3.0, 5.0]
+GEMINI_RETRY_DELAYS_SECONDS = [3.0, 5.0, 10.0]
 
 # --- 교사 인증(세션 전용; DB 미연동 시 재시작·새로고침 시 초기화) ---
 TEACHER_PASSWORD_DEFAULT = "0000"
@@ -565,6 +565,7 @@ def ask_gemini(
     if unavailable_error_seen:
         raise RuntimeError(
             "Gemini 서버가 일시적으로 혼잡합니다(503). 잠시 후 다시 시도해 주세요. "
+            "무료 API의 일시적 제한일 수 있으니 1분 후 다시 시도해 주세요. "
             "문제가 반복되면 입력을 조금 줄이거나 다른 시간대에 재시도해 주세요."
         )
     raise RuntimeError(
