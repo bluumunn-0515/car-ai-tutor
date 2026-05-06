@@ -24,6 +24,10 @@ try:
     from fpdf import FPDF  # pyright: ignore[reportMissingModuleSource]
 except ImportError:
     FPDF = None
+try:
+    from PIL import Image as PILImage
+except ImportError:
+    PILImage = None
 # '자동차 전기전자제어' 교과 NCS 능력단위(세부 단원)
 NCS_UNITS = [
     "자동차 전기전자장치 고장진단",
@@ -204,11 +208,12 @@ UNIT_INPUT_HINTS = {
     },
 }
 GEMINI_MODEL_CANDIDATES = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
     "gemini-1.5-flash",
+    "gemini-1.5-pro",
 ]
-GEMINI_RETRY_DELAYS_SECONDS = [3.0, 5.0, 10.0]
+GEMINI_RETRY_DELAYS_SECONDS = [2.0, 4.0]
+GEMINI_IMAGE_MAX_SIZE = (1024, 1024)
+GEMINI_IMAGE_JPEG_QUALITY = 85
 
 # --- 교사 인증(세션 전용; DB 미연동 시 재시작·새로고침 시 초기화) ---
 TEACHER_PASSWORD_DEFAULT = "0000"
@@ -494,6 +499,40 @@ def build_evaluation_prompt(
 
 [중요] 위 4개 섹션 헤더(##)를 정확히 그대로 사용한다. 표는 반드시 Markdown 표 형식으로 작성한다.
 """.strip()
+
+
+def _prepare_image_for_gemini(image_file: Any) -> tuple[bytes, str]:
+    """Gemini 호출 전 이미지를 안전한 크기로 리사이징한다.
+
+    - 학생이 스마트폰으로 촬영한 고해상도 사진(수 MB)을 그대로 보내면 업로드/추론 단계에서
+      Timeout·503 에러가 자주 발생하므로, PIL을 사용해 최대 ``GEMINI_IMAGE_MAX_SIZE`` 안으로
+      축소하고 JPEG로 재인코딩해 페이로드를 줄인다.
+    - PIL이 없거나 이미지 디코딩 실패 시 원본 바이트를 그대로 반환해 호출은 계속 시도한다.
+    """
+    raw_bytes = image_file.getvalue() if hasattr(image_file, "getvalue") else b""
+    fallback_mime = getattr(image_file, "type", None) or "image/jpeg"
+    if not raw_bytes:
+        return b"", fallback_mime
+    if PILImage is None:
+        return raw_bytes, fallback_mime
+    try:
+        from io import BytesIO
+
+        with PILImage.open(BytesIO(raw_bytes)) as im:
+            im.load()
+            if im.mode in ("RGBA", "LA", "P"):
+                im = im.convert("RGB")
+            elif im.mode != "RGB":
+                im = im.convert("RGB")
+            im.thumbnail(GEMINI_IMAGE_MAX_SIZE, PILImage.LANCZOS)
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=GEMINI_IMAGE_JPEG_QUALITY, optimize=True)
+            return buf.getvalue(), "image/jpeg"
+    except Exception as exc:
+        logger.warning("이미지 리사이징 실패 — 원본 바이트로 폴백: %s", exc)
+        return raw_bytes, fallback_mime
+
+
 def ask_gemini(
     mode: str,
     user_symptom: str,
@@ -530,8 +569,7 @@ def ask_gemini(
         )
     parts = [types.Part.from_text(text=prompt)]
     if image_file is not None:
-        image_bytes = image_file.getvalue()
-        image_mime_type = image_file.type or "image/jpeg"
+        image_bytes, image_mime_type = _prepare_image_for_gemini(image_file)
         if image_bytes:
             parts.append(types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type))
     contents = [types.Content(role="user", parts=parts)]
