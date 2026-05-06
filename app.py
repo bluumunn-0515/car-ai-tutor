@@ -1693,11 +1693,65 @@ def _render_diagnosis_ncs_tab() -> None:
     )
 
 
+def _render_student_growth_dashboard() -> None:
+    """학생 본인의 누적 실습 기록을 요약해 보여주는 '나의 학습 성장 대시보드'."""
+    student_id = st.session_state.get("student_id") or ""
+    with st.expander("📈 나의 학습 성장 대시보드", expanded=True):
+        st.caption("지금까지의 실습 누적 데이터를 단원별 횟수와 개인 성취도 레이더로 요약해 보여줍니다.")
+        my_records = [
+            r for r in get_diagnostic_records()
+            if r.get("student_id") == student_id
+        ]
+        if not my_records:
+            st.info("첫 실습을 시작해보세요!")
+            return
+        col_left, col_right = st.columns([1, 1])
+        with col_left:
+            st.markdown("##### 단원별 실습 횟수")
+            unit_counts = {unit: 0 for unit in NCS_UNITS}
+            for rec in my_records:
+                unit = rec.get("unit") or ""
+                if unit in unit_counts:
+                    unit_counts[unit] += 1
+            for unit in NCS_UNITS:
+                count = unit_counts[unit]
+                st.markdown(f"✅ **{unit}** — {count}회")
+            st.caption(f"총 누적 실습: {len(my_records)}회")
+        with col_right:
+            st.markdown("##### 개인 성취도 레이더")
+            labels, values = compute_class_average_unit_scores(my_records)
+            if not labels:
+                st.caption("유효한 평가 결과가 누적되면 레이더 차트가 표시됩니다.")
+            elif go is None:
+                st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
+            else:
+                labels_closed = labels + [labels[0]]
+                values_closed = values + [values[0]]
+                fig = go.Figure(
+                    data=[
+                        go.Scatterpolar(
+                            r=values_closed,
+                            theta=labels_closed,
+                            fill="toself",
+                            name="개인 성취율(%)",
+                        )
+                    ]
+                )
+                fig.update_layout(
+                    polar={"radialaxis": {"visible": True, "range": [0, 100]}},
+                    showlegend=False,
+                    margin={"l": 30, "r": 30, "t": 40, "b": 30},
+                    title="나의 NCS 능력단위 누적 성취율",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+
 def render_student_mode() -> None:
     sname = (st.session_state.get("student_display_name") or "").strip() or "학생"
     st.success(f"안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
     st.header("학생 학습 경로")
     st.caption("교과·단원을 고른 뒤 AI 튜터와 실습하고, 포트폴리오 PDF로 정리할 수 있습니다.")
+    _render_student_growth_dashboard()
     with st.sidebar:
         st.header("학생 설정")
         st.caption(
