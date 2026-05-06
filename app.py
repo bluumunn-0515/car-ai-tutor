@@ -207,9 +207,17 @@ UNIT_INPUT_HINTS = {
         "question": "예: 종단저항·주선 단선 중 어디부터 측정해야 하나요? 120Ω 기준은요?",
     },
 }
+# Google AI Studio가 2024~2025년 사이 1.5 라인을 v1beta에서 단계적으로 디프리케이션하면서
+# `gemini-1.5-flash`/`gemini-1.5-pro` 가 신규 키에서 404(NOT_FOUND)로 막히는 사례가 늘었다.
+# 그래서 현재 시점 가장 안정적인 2.x flash 라인을 1순위로 두고, 계정/리전 상황에 따라
+# 라우팅이 다를 수 있는 alias 들을 폴백으로 함께 제공한다. 404가 나면 즉시 다음 후보로 넘어간다.
 GEMINI_MODEL_CANDIDATES = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-1.5-flash-latest",
     "gemini-1.5-flash",
-    "gemini-1.5-pro",
 ]
 GEMINI_RETRY_DELAYS_SECONDS = [2.0, 4.0]
 GEMINI_IMAGE_MAX_SIZE = (1024, 1024)
@@ -607,8 +615,10 @@ def ask_gemini(
             "문제가 반복되면 입력을 조금 줄이거나 다른 시간대에 재시도해 주세요."
         )
     raise RuntimeError(
-        "현재 계정에서 사용 가능한 Gemini 모델을 찾지 못했습니다. "
-        "Google AI Studio에서 지원 모델명을 확인한 뒤 상단 GEMINI_MODEL_CANDIDATES를 수정해 주세요. "
+        "현재 API 키로 사용 가능한 Gemini 모델을 찾지 못했습니다. "
+        "Google AI Studio(https://aistudio.google.com/)에서 키가 활성화돼 있고 "
+        "`gemini-2.0-flash` 또는 `gemini-2.5-flash` 모델 사용 권한이 있는지 확인해 주세요. "
+        "1.5 라인은 단계적으로 디프리케이션되어 신규 키에서는 404가 날 수 있습니다. "
         f"(마지막 오류: {last_error})"
     )
 def split_sections(result_text: str) -> dict:
