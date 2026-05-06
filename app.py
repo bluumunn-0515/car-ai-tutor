@@ -689,8 +689,8 @@ def render_mission_card(guidance_text: str) -> None:
         st.caption("아직 생성된 가이드가 없습니다.")
         return
     with st.container(border=True):
-        st.markdown("##### 🧭 AI 진단 가이드 (Mission)")
-        st.caption("정답이 아니라 '진단 방향'과 '측정/점검 방법'을 미션 형태로 안내합니다.")
+        st.markdown("### 🧭 **AI 진단 가이드 (Mission)**")
+        st.caption("나침반(Compass)처럼 학습 방향을 잡아 주는 미션 카드 — 정답이 아니라 '진단 방향'과 '측정/점검 방법'을 안내합니다.")
         st.markdown(guidance_text)
 
 
@@ -870,6 +870,122 @@ def build_pdf_bytes(
         pdf.multi_cell(0, 8, evaluation_text)
         pdf.ln(2)
     return bytes(pdf.output(dest="S"))
+
+
+def build_comprehensive_portfolio_pdf(
+    student_id: str,
+    student_name: str,
+    records: list[dict],
+) -> bytes:
+    """학생의 모든 실습 기록을 하나의 PDF로 합쳐 종합 포트폴리오로 만든다.
+
+    표지(학생 정보 + 총 실습 건수) → 기록별 페이지(단원명/입력 증상/AI 가이드/수행 결과/NCS 성취도)
+    순서로 구성한다. 한글 출력을 위해 같은 폴더의 ``malgun.ttf`` 폰트를 사용한다.
+    """
+    if FPDF is None:
+        raise RuntimeError("fpdf2 라이브러리가 필요합니다.")
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    font_path = Path(__file__).resolve().parent / "malgun.ttf"
+    has_korean_font = False
+    try:
+        if font_path.exists():
+            pdf.add_font("Malgun", "", str(font_path))
+            has_korean_font = True
+    except Exception:
+        has_korean_font = False
+
+    def _set_font(size: int, bold: bool = False) -> None:
+        # fpdf2 는 동일 TTF 를 굵게 흉내 내기 어렵기 때문에 size 변화로 위계만 표현한다.
+        if has_korean_font:
+            pdf.set_font("Malgun", size=size)
+        else:
+            pdf.set_font("Helvetica", style="B" if bold else "", size=size)
+
+    def _write_block(label: str, body: str) -> None:
+        body_text = (body or "").strip() or "(내용 없음)"
+        _set_font(12, bold=True)
+        pdf.multi_cell(0, 8, f"[{label}]")
+        _set_font(11)
+        pdf.multi_cell(0, 7, body_text)
+        pdf.ln(2)
+
+    # ─────────── 표지 ───────────
+    pdf.add_page()
+    pdf.ln(20)
+    _set_font(20, bold=True)
+    pdf.multi_cell(0, 14, "자동차 전기전자제어 실습 종합 포트폴리오")
+    pdf.ln(8)
+    _set_font(13)
+    pdf.multi_cell(0, 9, f"학생 성명: {student_name or '-'}")
+    pdf.multi_cell(0, 9, f"학번: {student_id or '-'}")
+    pdf.multi_cell(0, 9, f"총 실습 건수: {len(records)}건")
+    pdf.multi_cell(0, 9, f"발행일: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    pdf.ln(6)
+    _set_font(11)
+    pdf.multi_cell(
+        0,
+        7,
+        "본 포트폴리오는 NCS '자동차 전기전자제어' 능력단위 기반의 실습 기록을 "
+        "시간 순으로 정리한 학습 결과물입니다.",
+    )
+
+    # ─────────── 본문: 실습별 페이지 ───────────
+    if not records:
+        pdf.add_page()
+        _set_font(12)
+        pdf.multi_cell(0, 8, "아직 등록된 실습 기록이 없습니다.")
+        return bytes(pdf.output(dest="S"))
+
+    sorted_records = sorted(records, key=lambda r: r.get("submitted_at") or "")
+    for idx, rec in enumerate(sorted_records, start=1):
+        pdf.add_page()
+        guidance_text, evaluation_text = split_combined_result(rec.get("result") or "")
+        score_input_text = evaluation_text or (rec.get("result") or "")
+        try:
+            ncs = calculate_ncs_scores(
+                score_input_text,
+                rec.get("mode") or "학습 모드",
+                guidance_text=guidance_text,
+            )
+            overall_rate = ncs.get("overall_rate", 0.0)
+            unit_scores = ncs.get("unit_scores", [])
+        except Exception:
+            overall_rate = 0.0
+            unit_scores = []
+
+        _set_font(15, bold=True)
+        pdf.multi_cell(0, 10, f"실습 #{idx}")
+        _set_font(11)
+        pdf.multi_cell(0, 7, f"진단 일시: {rec.get('submitted_at') or '-'}")
+        pdf.multi_cell(0, 7, f"선택 모드: {rec.get('mode') or '-'}")
+        pdf.ln(2)
+
+        _write_block("단원명", rec.get("unit") or "-")
+        _write_block("입력 증상", rec.get("symptom") or "")
+        _write_block("AI 가이드", guidance_text or "(AI 가이드 텍스트가 저장되지 않았습니다.)")
+        _write_block("수행 결과", rec.get("reasoning") or "")
+
+        ncs_lines = [f"종합 성취율: {overall_rate:.1f}%"]
+        for us in unit_scores:
+            unit = us.get("unit", "")
+            completion_pct = float(us.get("completion", 0.0)) * 100
+            missing = us.get("missing_labels") or []
+            line = f"- {unit}: {completion_pct:.0f}%"
+            if missing:
+                line += f" / 보완: {', '.join(missing[:2])}"
+            ncs_lines.append(line)
+        if (rec.get("teacher_feedback") or "").strip():
+            ncs_lines.append("")
+            ncs_lines.append("[교사 피드백]")
+            ncs_lines.append(rec["teacher_feedback"].strip())
+        _write_block("NCS 성취도", "\n".join(ncs_lines))
+
+    return bytes(pdf.output(dest="S"))
+
+
 def render_ncs_achievement(result_text: str, mode: str, guidance_text: str = "") -> None:
     st.markdown("#### NCS 능력단위 성취도 체크")
     if not result_text:
@@ -1394,9 +1510,9 @@ def render_student_login() -> None:
 
 
 _DIAG_STEPS = [
-    ("input", "1단계 · 진단 입력", "부품·증상·학습 질문을 입력합니다."),
-    ("guidance", "2단계 · AI 가이드 → 실습 결과", "AI 미션을 따라 실측한 결과를 입력합니다."),
-    ("result", "3단계 · 평가 & NCS 성취도", "충실도·NCS 정렬을 분석합니다."),
+    ("input", "1단계 · 학습 과제 입력", "부품·증상·학습 질문을 입력합니다."),
+    ("guidance", "2단계 · 미션 수행 & 결과 기록", "AI 미션(나침반)을 따라 실측한 결과를 입력합니다."),
+    ("result", "3단계 · 성취도 분석 & 피드백", "수행 충실도·NCS 정렬을 분석합니다."),
 ]
 
 
@@ -1600,15 +1716,26 @@ def _render_diagnosis_input_tab(
             try:
                 append_diagnostic_record(record)
                 shb.invalidate_all_sheet_caches()
-                st.success("실습 평가가 완료되어 history 시트에 저장되었습니다. [AI 피드백] · [NCS 성취도 분석] 탭에서 확인하세요.")
+                st.session_state["_just_completed_step2"] = True
+                st.toast("📈 성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="🎉")
+                st.balloons()
             except Exception as sheet_exc:
                 st.warning(f"평가는 생성되었으나 Google Sheets 저장에 실패했습니다: {sheet_exc}")
             st.rerun()
         return
 
     # ──────────────────── [단계 3] 결과 표시 / 새 진단 ────────────────────
-    st.subheader("③ 진단 완료")
-    st.success("🎉 모든 단계가 완료되었습니다. 결과는 [AI 피드백] · [NCS 성취도 분석] 탭에서 확인하세요.")
+    st.subheader("③ 학습 성찰 단계")
+    st.success(
+        "🎉 **모든 학습 활동이 완료되었습니다!**\n\n"
+        "👉 상단의 **[📈 성취도 분석]** 탭으로 이동해 NCS 성취도와 가이드 충실도를 확인하세요.\n"
+        "👉 **[🔍 AI 코칭]** 탭에서는 AI 진단 가이드와 평가 카드를 한 번에 다시 볼 수 있어요."
+    )
+    if st.session_state.pop("_just_completed_step2", False):
+        st.info(
+            "📌 **다음 단계 안내** — 위쪽 탭 가운데 **📈 성취도 분석**을 눌러 결과 레이더 차트를 확인해 보세요. "
+            "잘한 영역과 보완이 필요한 능력단위를 한눈에 점검할 수 있습니다."
+        )
     with st.expander("이번 진단 입력 요약", expanded=False):
         st.code(st.session_state.get("latest_symptom") or "(미입력)")
         if st.session_state.get("latest_execution_result"):
@@ -1620,13 +1747,13 @@ def _render_diagnosis_input_tab(
 
 
 def _render_diagnosis_feedback_tab() -> None:
-    """AI 피드백 탭: 단계별로 가이드/평가 카드를 보여주고, 완료 시 PDF 다운로드를 제공한다."""
-    st.subheader("AI 진단 피드백")
+    """🔍 AI 코칭 탭: 단계별로 가이드/평가 카드를 보여주고, 완료 시 PDF 다운로드를 제공한다."""
+    st.subheader("🔍 AI 코칭 — 진단 가이드 & 수행 평가")
     diag_step = st.session_state.get("diag_step", "input")
     guidance_text = st.session_state.get("latest_guidance", "")
     evaluation_text = st.session_state.get("latest_evaluation", "")
     if diag_step == "input" and not guidance_text:
-        st.caption("아직 생성된 피드백이 없습니다. [진단 입력] 탭에서 1단계를 먼저 진행해 주세요.")
+        st.caption("아직 생성된 코칭 카드가 없습니다. [📝 실습 수행] 탭에서 1단계를 먼저 진행해 주세요.")
         return
     st.caption(
         f"교과: {st.session_state.get('latest_subject', '')} | 단원: {st.session_state.get('latest_unit', '')} | 모드: {st.session_state.get('latest_mode', '')}"
@@ -1635,7 +1762,7 @@ def _render_diagnosis_feedback_tab() -> None:
         render_photo_retake_notice(guidance_text)
         render_mission_card(guidance_text)
     if diag_step == "guidance" and not evaluation_text:
-        st.info("📌 [단계 2] 실습 수행 결과를 [진단 입력] 탭에서 제출하면 평가가 이 카드 아래에 추가됩니다.")
+        st.info("📌 [단계 2] 실습 수행 결과를 [📝 실습 수행] 탭에서 제출하면 평가 카드가 이 아래에 추가됩니다.")
     if evaluation_text:
         st.markdown("---")
         render_evaluation_card(evaluation_text)
@@ -1675,17 +1802,22 @@ def _render_diagnosis_feedback_tab() -> None:
 
 
 def _render_diagnosis_ncs_tab() -> None:
-    """NCS 성취도 탭: [단계 2] 결과 입력이 끝난 뒤에만 분석/레이더를 보여 준다."""
-    st.subheader("NCS 성취도 분석")
+    """📈 성취도 분석 탭: [단계 2] 결과 입력이 끝난 뒤에만 분석/레이더를 보여 준다."""
+    st.subheader("📈 성취도 분석 — NCS 능력단위 정렬 결과")
     diag_step = st.session_state.get("diag_step", "input")
     if diag_step != "result":
         st.info(
-            "📊 NCS 성취도 분석은 **[단계 2] 실습 수행 결과** 제출이 끝난 뒤에 생성됩니다.\n\n"
+            "📊 성취도 분석은 **[단계 2] 실습 수행 결과** 제출이 끝난 뒤에 생성됩니다.\n\n"
             "• 1단계: 부품·증상 입력 → AI 가이드 받기\n"
             "• 2단계: 가이드를 따라 측정·판단 → 결과 입력 후 제출\n"
-            "• 3단계: 여기에서 NCS 성취도 레이더와 가이드 충실도 분석을 확인할 수 있어요."
+            "• 3단계: 여기에서 NCS 능력단위 성취도 레이더와 가이드 충실도 분석을 확인할 수 있어요."
         )
         return
+    if st.session_state.get("_just_completed_step2"):
+        st.success(
+            "🎯 방금 제출한 실습 결과의 성취도 분석이 도착했어요. "
+            "아래 레이더 차트와 단원별 보완 항목을 확인하며 학습을 마무리해 봅시다!"
+        )
     render_ncs_achievement(
         st.session_state.get("latest_evaluation", "") or st.session_state.get("latest_execution_result", ""),
         st.session_state.get("latest_mode", "학습 모드"),
@@ -1696,6 +1828,7 @@ def _render_diagnosis_ncs_tab() -> None:
 def _render_student_growth_dashboard() -> None:
     """학생 본인의 누적 실습 기록을 요약해 보여주는 '나의 학습 성장 대시보드'."""
     student_id = st.session_state.get("student_id") or ""
+    student_name = (st.session_state.get("student_display_name") or "").strip() or student_id
     with st.expander("📈 나의 학습 성장 대시보드", expanded=True):
         st.caption("지금까지의 실습 누적 데이터를 단원별 횟수와 개인 성취도 레이더로 요약해 보여줍니다.")
         my_records = [
@@ -1705,6 +1838,28 @@ def _render_student_growth_dashboard() -> None:
         if not my_records:
             st.info("첫 실습을 시작해보세요!")
             return
+        if FPDF is None:
+            st.caption("📌 종합 포트폴리오 PDF 추출을 사용하려면 `pip install fpdf2`를 실행해 주세요.")
+        else:
+            try:
+                portfolio_bytes = build_comprehensive_portfolio_pdf(
+                    student_id=student_id,
+                    student_name=student_name,
+                    records=my_records,
+                )
+                st.download_button(
+                    "🎓 종합 포트폴리오 PDF 추출",
+                    data=portfolio_bytes,
+                    file_name=(
+                        f"comprehensive_portfolio_{student_id or 'student'}_"
+                        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                    ),
+                    mime="application/pdf",
+                    use_container_width=True,
+                    help="지금까지 누적된 모든 실습 기록을 한 권의 PDF 포트폴리오로 합쳐 내려받습니다.",
+                )
+            except Exception as exc:
+                st.error(f"종합 포트폴리오 PDF 생성 중 오류가 발생했습니다: {exc}")
         col_left, col_right = st.columns([1, 1])
         with col_left:
             st.markdown("##### 단원별 실습 횟수")
@@ -1775,7 +1930,7 @@ def render_student_mode() -> None:
     selected_unit = st.selectbox("단원 선택", unit_choices, index=0)
     st.info(f"교과: **{selected_subject}** → 단원: **{selected_unit}**")
     _render_diagnosis_progress(st.session_state.get("diag_step", "input"))
-    tab_input, tab_feedback, tab_ncs = st.tabs(["진단 입력", "AI 피드백", "NCS 성취도 분석"])
+    tab_input, tab_feedback, tab_ncs = st.tabs(["📝 실습 수행", "🔍 AI 코칭", "📈 성취도 분석"])
     with tab_input:
         _render_diagnosis_input_tab(
             mode=mode,
@@ -1834,7 +1989,7 @@ def render_student_mode() -> None:
                     st.session_state.latest_mode = item.get("mode") or "학습 모드"
                     st.session_state.latest_generated_at = submitted_at
                     st.session_state.diag_step = "result"
-                    st.toast("이전 진단 이력을 불러왔어요. [AI 피드백] 탭에서 확인하세요.", icon="📂")
+                    st.toast("이전 실습 이력을 불러왔어요. [🔍 AI 코칭] 탭에서 확인하세요.", icon="📂")
                     st.rerun()
     else:
         st.caption("이 계정으로 저장된 진단 이력이 없습니다.")
