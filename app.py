@@ -385,8 +385,11 @@ def build_learning_prompt(
 
 [작성 원칙 — 반드시 준수]
 - ❌ 결론·정답 단정 금지(예: "원인은 ~다", "~를 교체하면 됩니다" 등 직접적 답).
+- ❌ **"## 📋 NCS 기반 수행 순서" 섹션에서는 표(Markdown table)를 절대 사용하지 말 것.**
 - ✅ 진단 방향과 측정/점검 절차를 **'미션' 형태**로 제시.
-- ✅ 장황한 서술 대신 **불렛(•)과 표(Markdown table)**를 적극 사용.
+- ✅ "수행 순서" 섹션은 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 분류하고, 각 단계는 **`• [핵심 행동] **[규정값]**`** 형태의 **단문**(20자 이내, 규정값 제외)으로만 작성.
+- ✅ 규정값(예: 12.6V, 0.2V 이하, 120Ω 등)은 반드시 Markdown **굵게** 표기(`**12.6V**`).
+- ✅ "수행 순서" 외 섹션(권장 측정 도구 등)에서는 표 사용 가능. 다른 섹션도 가능하면 짧은 불릿(•)으로.
 - ✅ 단원 핵심 키워드(예: OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 자연스럽게 포함.
 - ✅ [표준 절차]의 (가) 안전 점검 → (나) 회로도 분석(전원→퓨즈→스위치/릴레이→부하→접지) → (다) 시험등 vs DMM 사용 기준 → (라) 스캐너 절차(DTC→센서데이터→강제구동) 흐름을 미션에 녹인다.
 - ✅ [학생 입력 증상]에 [학습 질문]이 비어 있지 않다면, **`💡 학습 질문 힌트` 섹션에서 그 질문을 우선적으로 다룬다**(정답은 X, 소크라테스식 힌트만).
@@ -410,13 +413,23 @@ def build_learning_prompt(
 | (필요 시) 시험등/오실로스코프 | … | … |
 
 ## 📋 NCS 기반 수행 순서 (Mission Steps)
-| 단계 | 행동(미션) | 안전·규정값 핵심 포인트 |
-| --- | --- | --- |
-| 1 | 안전 점검(절연장갑·단자 보호 등) | 단락 방지, 점화스위치 OFF 확인 |
-| 2 | 회로도 분석: 전원→퓨즈→스위치/릴레이→부하→접지 | 단원 핵심 회로 흐름 명시 |
-| 3 | 측정 미션 1 | 규정값 범위(예: OCV 12.3~12.9V) |
-| 4 | 측정 미션 2 | … |
-| 5 | (필요 시) 스캐너 진단 | DTC→센서데이터→강제구동 순서 |
+> ⚠ 이 섹션은 **반드시 아래 4개의 ### 소제목** 으로만 작성한다. **표 사용 금지**. 각 단계는 짧은 불릿(•) 한 줄, **20자 이내(규정값 제외)**.
+
+### 🛡️ 준비 / 안전
+• 점화스위치 OFF 확인
+• 절연장갑 착용
+
+### 🔍 점검 / 회로도
+• 회로도 퓨즈 위치 식별
+• 커넥터 핀 번호 확인
+
+### ⚡ 측정 / 전압
+• OCV 측정 **12.3~12.9V**
+• 전압강하 측정 **0.2V 이하**
+
+### 🛠️ 판정 / 조치
+• SOC 75% 이상 양호
+• 규정 외 시 단품 점검
 
 ## ⚠ 안전 주의
 • …
@@ -429,7 +442,10 @@ def build_learning_prompt(
 ## 📷 추가 촬영 가이드 (신뢰도 낮은 경우만)
 • 각도/거리/초점 …
 
-[중요] 위 7개 섹션 헤더(##)를 정확히 그대로 사용한다. 표는 반드시 Markdown 표 형식으로 작성한다.
+[중요]
+- 위 7개 H2 섹션 헤더(##)를 정확히 그대로 사용한다.
+- "수행 순서" 섹션 안의 4개 H3 소제목(🛡️ 준비 / 안전, 🔍 점검 / 회로도, ⚡ 측정 / 전압, 🛠️ 판정 / 조치)을 정확히 그대로 사용한다. 표 금지.
+- 각 단계 불릿은 단문(20자 이내) + 규정값은 **굵게**.
 """.strip()
 def build_evaluation_prompt(
     user_symptom: str,
@@ -479,8 +495,10 @@ def build_evaluation_prompt(
 [작성 원칙 — 반드시 준수]
 - ❌ '합격/불합격' 표현 금지.
 - ❌ 정답을 단정하여 노출하지 말 것(필요 시 "권장 진단 방향" 정도로 표현).
-- ✅ **불렛(•)과 표(Markdown table)** 를 적극 사용해 가독성 우선.
-- ✅ [단계 1 AI 가이드]의 미션 단계와 학생 수행 결과를 **표로 1:1 비교**해 충실도를 별점/이모지(★★★ / ★★☆ / ★☆☆ / ☆☆☆)로 표기.
+- ❌ **"## ✅ 가이드 대비 수행 충실도" 섹션에서는 표(Markdown table)를 절대 사용하지 말 것.**
+- ✅ "가이드 대비 수행 충실도"는 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 구분하고, 각 단계는 `• [핵심 행동] — [별점] — [짧은 코멘트]` 형태의 단문(코멘트 25자 이내)으로 작성. 별점은 ★★★ / ★★☆ / ★☆☆ / ☆☆☆.
+- ✅ 규정값(예: 12.6V, 0.2V 이하, 120Ω 등)은 반드시 Markdown **굵게** 표기.
+- ✅ "NCS 기준 4축 분석" 등 다른 섹션은 표(Table) 사용 가능.
 - ✅ 표준 절차 (가)안전 점검 / (나)회로도 분석 / (다)시험등 vs DMM / (라)스캐너 절차(DTC→센서데이터→강제구동) 네 측면에서 강·약점을 짚는다.
 - ✅ 단원 핵심 키워드(OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 인용해 구체화.
 - ✅ [학생 입력 증상]에 [학습 질문]이 있다면, `다음 학습 미션` 섹션에서 그 질문에 직접적으로 도움이 되는 후속 실습을 제안한다.
@@ -491,13 +509,23 @@ def build_evaluation_prompt(
 • (이번 실습 수행을 한 줄로 평가)
 
 ## ✅ 가이드 대비 수행 충실도
-| 미션 단계 | 가이드 권장 동작 | 학생 수행 결과 | 충실도 |
-| --- | --- | --- | --- |
-| 1 | 안전 점검 | … | ★★☆ |
-| 2 | 회로도 분석(전원→…→접지) | … | ★☆☆ |
-| 3 | 측정 미션 1 | … | ★★★ |
-| 4 | 측정 미션 2 | … | ☆☆☆ |
-| 5 | (해당 시) 스캐너 절차 | … | … |
+> ⚠ 표 금지. 아래 4개 ### 소제목으로만 작성한다. 각 줄: `• [핵심 행동] — [별점] — [짧은 코멘트]`
+
+### 🛡️ 준비 / 안전
+• 점화 OFF 확인 — ★★☆ — 절차 일부 확인됨
+• 절연장갑 착용 — ☆☆☆ — 언급 누락
+
+### 🔍 점검 / 회로도
+• 회로도 분석 — ★★★ — 전원→접지 흐름 명확
+• 커넥터 핀 식별 — ★☆☆ — 핀 번호 누락
+
+### ⚡ 측정 / 전압
+• OCV 측정 **12.45V** — ★★★ — 규정 범위 내
+• 전압강하 측정 — ☆☆☆ — 미수행
+
+### 🛠️ 판정 / 조치
+• SOC 양호 판정 — ★★☆ — 근거 보완 필요
+• 단품 점검 제안 — ★★★ — 후속 계획 명확
 
 ## 🔍 NCS 기준 4축 분석
 | 분석 축 | 학생 수행에서 확인된 점 | 보완 필요 |
@@ -514,7 +542,10 @@ def build_evaluation_prompt(
 • 다음에 학생이 수행할 구체적인 측정/진단 과제(규정값·측정 포인트 포함)
 • [학습 질문]에 대한 후속 실습 동선 제안
 
-[중요] 위 4개 섹션 헤더(##)를 정확히 그대로 사용한다. 표는 반드시 Markdown 표 형식으로 작성한다.
+[중요]
+- 위 4개 H2 섹션 헤더(##)를 정확히 그대로 사용한다.
+- "가이드 대비 수행 충실도" 섹션 안의 4개 H3 소제목(🛡️ 준비 / 안전, 🔍 점검 / 회로도, ⚡ 측정 / 전압, 🛠️ 판정 / 조치)을 정확히 그대로 사용한다. 표 금지.
+- 규정값은 **굵게**(Markdown bold) 표기.
 """.strip()
 
 
@@ -738,58 +769,317 @@ def _render_legacy_feedback(result_text: str, mode: str) -> None:
             st.markdown(body)
 
 
+# ─────────────────── 마크다운 가이드/평가 파서 ───────────────────
+# [단계 1] AI 가이드와 [단계 2] 평가 결과는 ## H2 + ### H3 구조로 작성되므로
+# 정규표현식으로 섹션과 불릿을 추출해 인터랙티브 탭/Expander UI로 재구성한다.
+_H2_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
+_H3_RE = re.compile(r"(?m)^###\s+(.+?)\s*$")
+_BULLET_RE = re.compile(r"^\s*(?:[•\-\*])\s*(.*)$")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _split_by_heading(text: str, regex: re.Pattern) -> list[tuple[str, str]]:
+    matches = list(regex.finditer(text))
+    if not matches:
+        return []
+    out: list[tuple[str, str]] = []
+    for i, m in enumerate(matches):
+        header = m.group(1).strip()
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        out.append((header, body))
+    return out
+
+
+def _extract_bullets(body: str) -> list[str]:
+    bullets: list[str] = []
+    for line in body.splitlines():
+        m = _BULLET_RE.match(line)
+        if m:
+            content = m.group(1).strip()
+            if content:
+                bullets.append(content)
+    return bullets
+
+
+def _classify_step_category(header: str) -> Optional[str]:
+    """### 소제목을 4개 미션 카테고리(safety/inspect/measure/judge)로 분류."""
+    h = header.replace("*", "")
+    if "🛡" in h or "준비" in h or "안전" in h:
+        return "safety"
+    if "🔍" in h or "점검" in h or "회로도" in h:
+        return "inspect"
+    if "⚡" in h or "측정" in h or "전압" in h:
+        return "measure"
+    if "🛠" in h or "판정" in h or "조치" in h:
+        return "judge"
+    return None
+
+
+def _parse_structured_markdown(text: str, steps_h2_keyword: str) -> dict:
+    """공통 파서: build_learning_prompt / build_evaluation_prompt 출력 구조를 동일하게 파싱한다.
+
+    Args:
+        text: 원본 마크다운
+        steps_h2_keyword: ### 단계 그룹을 가진 H2 섹션을 식별할 키워드
+            (가이드는 "수행 순서", 평가는 "충실도")
+
+    Returns dict:
+        h2_sections: list[(header, body)] 원본 H2 섹션 그대로
+        steps_groups: dict[category] -> list[bullet]
+        has_new_format: 4개 카테고리 중 1개 이상 불릿이 있으면 True (탭 UI 사용 가능)
+    """
+    result = {
+        "h2_sections": [],
+        "steps_groups": {"safety": [], "inspect": [], "measure": [], "judge": []},
+        "steps_h2_body": "",
+        "has_new_format": False,
+    }
+    if not (text or "").strip():
+        return result
+    h2_sections = _split_by_heading(text, _H2_RE)
+    if not h2_sections:
+        return result
+    result["h2_sections"] = h2_sections
+    for header, body in h2_sections:
+        if steps_h2_keyword in header.replace("*", ""):
+            result["steps_h2_body"] = body
+            for sub_header, sub_body in _split_by_heading(body, _H3_RE):
+                cat = _classify_step_category(sub_header)
+                if cat is None:
+                    continue
+                result["steps_groups"][cat].extend(_extract_bullets(sub_body))
+            break
+    result["has_new_format"] = any(result["steps_groups"].values())
+    return result
+
+
+def _find_h2_body(h2_sections: list[tuple[str, str]], *keywords: str) -> str:
+    for header, body in h2_sections:
+        h = header.replace("*", "")
+        if any(k in h for k in keywords):
+            return body
+    return ""
+
+
+def _strip_bold(text: str) -> str:
+    return _BOLD_RE.sub(r"\1", text)
+
+
+def _render_regulation_badges(values: list[str]) -> None:
+    if not values:
+        return
+    badges = " ".join(
+        f'<span style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;'
+        f'padding:0.28rem 0.75rem;border-radius:10px;font-weight:700;margin:0.15rem 0.3rem 0.15rem 0;'
+        f'display:inline-block;font-size:1.0rem;">📐 {v}</span>'
+        for v in values
+    )
+    st.markdown(
+        f'<div style="margin:0.25rem 0 0.6rem 0;font-size:1.0rem;"><b>규정값/기준:</b> {badges}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_step_cards(steps: list[str], icon: str, empty_msg: str = "") -> None:
+    """진행형 Expander 카드 — 첫 단계만 펼쳐두고, 학생이 다음 단계를 펼쳐 보도록 유도한다."""
+    if not steps:
+        if empty_msg:
+            st.caption(empty_msg)
+        return
+    for idx, step in enumerate(steps):
+        bold_values = _BOLD_RE.findall(step)
+        title_clean = _strip_bold(step)
+        is_first = idx == 0
+        with st.expander(f"{icon} 단계 {idx + 1} · {title_clean}", expanded=is_first):
+            _render_regulation_badges(bold_values)
+            st.caption("✅ 이 단계를 수행했다면, 아래 다음 단계 카드를 펼쳐 이동하세요.")
+
+
+def _render_eval_step_cards(steps: list[str], icon: str, empty_msg: str = "") -> None:
+    """평가 카드용: `행동 — ★★☆ — 코멘트` 형태 줄을 별점/코멘트와 함께 카드로 보여준다."""
+    if not steps:
+        if empty_msg:
+            st.caption(empty_msg)
+        return
+    for idx, raw in enumerate(steps):
+        parts = [p.strip() for p in raw.split("—")]
+        action = parts[0] if parts else raw
+        stars = parts[1] if len(parts) >= 2 else ""
+        comment = " — ".join(parts[2:]) if len(parts) >= 3 else ""
+        bold_values = _BOLD_RE.findall(action)
+        action_clean = _strip_bold(action)
+        title = f"{icon} {action_clean}"
+        if stars:
+            title += f"  ·  {stars}"
+        with st.expander(title, expanded=(idx == 0)):
+            if comment:
+                st.markdown(f"💬 {comment}")
+            _render_regulation_badges(bold_values)
+
+
 def render_mission_card(guidance_text: str) -> None:
-    """[단계 1] AI 미션 카드 — 'AI 튜터의 비밀 지령' 컨셉으로 chat_message 안에 테두리 박스를 렌더한다."""
+    """[단계 1] AI 미션 카드 — 3 tabs(준비/안전 · 측정 미션 · 고장 판정) + 진행형 Expander.
+
+    레거시(H2만 있고 H3 4카테고리가 없는) 가이드는 원문 마크다운으로 폴백한다.
+    """
     if not guidance_text or not guidance_text.strip():
         st.caption("아직 생성된 가이드가 없습니다.")
         return
+
+    parsed = _parse_structured_markdown(guidance_text, steps_h2_keyword="수행 순서")
+    h2_sections = parsed["h2_sections"]
+    groups = parsed["steps_groups"]
+
+    summary = _find_h2_body(h2_sections, "미션 요약")
+    target = _find_h2_body(h2_sections, "점검 대상")
+    tools = _find_h2_body(h2_sections, "측정 도구", "권장 측정")
+    safety_notes = _find_h2_body(h2_sections, "안전 주의")
+    hint = _find_h2_body(h2_sections, "학습 질문 힌트")
+    photo = _find_h2_body(h2_sections, "추가 촬영")
+
+    # ─── 미션 브리핑 배너 ───
     with st.chat_message("assistant", avatar="🧭"):
         st.markdown(
-            """
-            <div style="
-                background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
-                color:#fef3c7;
-                padding:0.6rem 1rem;
-                border-radius:10px;
-                font-weight:700;
-                letter-spacing:0.02em;
-                margin-bottom:0.6rem;
-                box-shadow:0 2px 8px rgba(15,23,42,0.25);">
-                🤫 AI 튜터의 비밀 지령 — Mission Briefing
-            </div>
-            """,
+            '<div style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);'
+            'color:#fef3c7;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
+            'letter-spacing:0.02em;margin-bottom:0.6rem;font-size:1.12rem;'
+            'box-shadow:0 2px 8px rgba(15,23,42,0.25);">'
+            '🤫 AI 튜터의 비밀 지령 — Mission Briefing</div>',
             unsafe_allow_html=True,
         )
-        st.caption("정답은 아니야. 너만의 진단 미션이지. 표(Table)와 미션 단계대로 차근차근 따라가 봐!")
+        st.caption("정답은 없어. 너만의 진단 미션이지! 아래 3개 탭을 순서대로 클릭해 보자.")
+        if summary:
+            with st.container(border=True):
+                st.markdown("#### 🎯 미션 요약")
+                st.markdown(summary)
+
+    # ─── 레거시 폴백: 새 포맷(H3 4카테고리)이 없으면 원문 마크다운 그대로 ───
+    if not parsed["has_new_format"]:
         with st.container(border=True):
+            st.markdown("##### 📜 가이드 원문 (이전 포맷)")
             st.markdown(guidance_text)
+        return
+
+    # ─── 3 탭 인터랙티브 UI ───
+    tab_safety, tab_measure, tab_judge = st.tabs(
+        ["🛡️ 준비 / 안전", "⚡ 측정 미션", "🛠️ 고장 판정"]
+    )
+
+    with tab_safety:
+        if target:
+            with st.container(border=True):
+                st.markdown("#### 📍 점검 대상")
+                st.markdown(target)
+        if safety_notes:
+            with st.container(border=True):
+                st.markdown("#### ⚠ 안전 주의")
+                st.markdown(safety_notes)
+        st.markdown("##### 🛡️ 준비 / 안전 단계")
+        _render_step_cards(
+            groups["safety"], "🛡️",
+            empty_msg="준비/안전 단계가 비어 있어요. 점화 OFF · 절연장갑 등 기본 점검을 먼저 확인하세요.",
+        )
+
+    with tab_measure:
+        if tools:
+            with st.container(border=True):
+                st.markdown("#### 🛠 권장 측정 도구")
+                st.markdown(tools)
+        if groups["inspect"]:
+            st.markdown("##### 🔍 점검 / 회로도 단계")
+            _render_step_cards(groups["inspect"], "🔍")
+            st.markdown("")
+        st.markdown("##### ⚡ 측정 / 전압 단계")
+        _render_step_cards(
+            groups["measure"], "⚡",
+            empty_msg="측정 단계가 비어 있어요. 멀티미터 모드와 측정 포인트를 먼저 확인하세요.",
+        )
+
+    with tab_judge:
+        st.markdown("##### 🛠️ 판정 / 조치 단계")
+        _render_step_cards(
+            groups["judge"], "🛠️",
+            empty_msg="판정 단계가 비어 있어요. 측정값을 규정값과 비교해 판정해 보세요.",
+        )
+        if hint:
+            with st.container(border=True):
+                st.markdown("#### 💡 학습 질문 힌트")
+                st.markdown(hint)
+        if photo:
+            with st.expander("📷 추가 촬영 가이드", expanded=False):
+                st.markdown(photo)
 
 
 def render_evaluation_card(evaluation_text: str) -> None:
-    """[단계 2] 실습 수행 평가 카드 — 챗 메시지 형태로 점수표를 강조한다."""
+    """[단계 2] 실습 수행 평가 카드 — 4카테고리 충실도 카드 + 기타 H2 섹션."""
     if not evaluation_text or not evaluation_text.strip():
         st.caption("아직 생성된 평가가 없습니다.")
         return
+
+    parsed = _parse_structured_markdown(evaluation_text, steps_h2_keyword="충실도")
+    h2_sections = parsed["h2_sections"]
+    groups = parsed["steps_groups"]
+
+    one_liner = _find_h2_body(h2_sections, "한줄 요약", "평가 한줄")
+    axis_analysis = _find_h2_body(h2_sections, "4축 분석", "기준 4축")
+    weak_units = _find_h2_body(h2_sections, "보완이 필요한", "보완 필요")
+    next_mission = _find_h2_body(h2_sections, "다음 학습 미션", "다음 학습")
+
+    # ─── 결과 배너 ───
     with st.chat_message("assistant", avatar="📝"):
         st.markdown(
-            """
-            <div style="
-                background:linear-gradient(135deg,#065f46 0%,#10b981 100%);
-                color:#ecfdf5;
-                padding:0.6rem 1rem;
-                border-radius:10px;
-                font-weight:700;
-                letter-spacing:0.02em;
-                margin-bottom:0.6rem;
-                box-shadow:0 2px 8px rgba(6,95,70,0.25);">
-                🏆 미션 수행 평가 — Result Report
-            </div>
-            """,
+            '<div style="background:linear-gradient(135deg,#065f46 0%,#10b981 100%);'
+            'color:#ecfdf5;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
+            'letter-spacing:0.02em;margin-bottom:0.6rem;font-size:1.12rem;'
+            'box-shadow:0 2px 8px rgba(6,95,70,0.25);">'
+            '🏆 미션 수행 평가 — Result Report</div>',
             unsafe_allow_html=True,
         )
-        st.caption("가이드 대비 충실도와 NCS 수행준거 정렬도를 표로 정리한 평가 카드입니다.")
+        st.caption("가이드 대비 충실도와 NCS 수행준거 정렬도를 카테고리별로 정리한 평가 카드입니다.")
+        if one_liner:
+            with st.container(border=True):
+                st.markdown("#### 📋 평가 한줄 요약")
+                st.markdown(one_liner)
+
+    # ─── 레거시 폴백 ───
+    if not parsed["has_new_format"]:
         with st.container(border=True):
+            st.markdown("##### 📜 평가 원문 (이전 포맷)")
             st.markdown(evaluation_text)
+        return
+
+    # ─── 충실도 4카테고리 카드 ───
+    st.markdown("#### ✅ 가이드 대비 수행 충실도")
+    cat_safety, cat_measure, cat_judge = st.tabs(
+        ["🛡️ 준비 / 안전", "⚡ 측정 미션", "🛠️ 고장 판정"]
+    )
+    with cat_safety:
+        _render_eval_step_cards(groups["safety"], "🛡️", empty_msg="해당 카테고리 평가가 없어요.")
+    with cat_measure:
+        if groups["inspect"]:
+            st.markdown("##### 🔍 점검 / 회로도")
+            _render_eval_step_cards(groups["inspect"], "🔍")
+            st.markdown("")
+        st.markdown("##### ⚡ 측정 / 전압")
+        _render_eval_step_cards(groups["measure"], "⚡", empty_msg="해당 카테고리 평가가 없어요.")
+    with cat_judge:
+        _render_eval_step_cards(groups["judge"], "🛠️", empty_msg="해당 카테고리 평가가 없어요.")
+
+    # ─── 기타 분석 섹션 ───
+    if axis_analysis:
+        with st.container(border=True):
+            st.markdown("#### 🔍 NCS 기준 4축 분석")
+            st.markdown(axis_analysis)
+    if weak_units:
+        with st.container(border=True):
+            st.markdown("#### 🛠 보완이 필요한 능력 단위 요소")
+            st.markdown(weak_units)
+    if next_mission:
+        with st.container(border=True):
+            st.markdown("#### 🚀 다음 학습 미션")
+            st.markdown(next_mission)
 
 
 def render_feedback_cards(result_text: str, mode: str) -> None:
