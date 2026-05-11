@@ -1724,25 +1724,49 @@ def build_comprehensive_portfolio_pdf(
         else:
             pdf.set_font("Helvetica", style="B" if bold else "", size=size)
 
+    def _safe_text(s: str) -> str:
+        """Malgun TTF 가 처리하지 못하는 일부 이모지/기타 BMP 외 문자를 안전한 기호로 치환.
+
+        - 'Not enough horizontal space' 류의 오류가 폰트 글리프 결손에서 비롯되는 경우를
+          미리 방지한다. (▶ 등 ASCII/한자 권역의 안전한 대체 문자로 변환)
+        """
+        if not s:
+            return ""
+        replacements = {
+            "📓": "[일지]", "📅": "[날짜]", "🔍": "[수행]", "🧭": "[가이드]",
+            "🧪": "[측정]", "📝": "[소감]", "📷": "[사진]", "🏆": "[평가]",
+            "🗒": "[피드백]", "🎯": "[성취]", "🛡️": "[안전]", "📐": "[회로]",
+            "⚡": "[전기]", "🛠️": "[조치]", "📡": "[진단장비]", "📶": "[통신]",
+            "🔋": "[배터리]", "💡": "[조명]", "🚗": "[차량]",
+        }
+        out = s
+        for k, v in replacements.items():
+            out = out.replace(k, v)
+        return out
+
     def _section_label(label: str) -> None:
-        """섹션 라벨을 컬러 배지처럼 강조한다."""
+        """섹션 라벨을 컬러 배지처럼 강조한다.
+
+        ``cell()`` 은 한 줄 너비 초과 시 'Not enough horizontal space' 를 던질 수 있어
+        반드시 ``multi_cell()`` 로 자동 줄바꿈을 보장한다.
+        """
         _set_font(12, bold=True)
-        # 옅은 회색 배경 박스
         pdf.set_fill_color(241, 245, 249)  # slate-100
         pdf.set_text_color(15, 23, 42)      # slate-900
-        pdf.cell(0, 8, label, fill=True, ln=1)
+        pdf.multi_cell(0, 8, _safe_text(label), fill=True)
         pdf.set_text_color(0, 0, 0)
         pdf.ln(1)
 
     def _write_block(label: str, body: str, *, allow_empty_caption: bool = True) -> None:
-        body_text = (body or "").strip()
+        body_text = _safe_text((body or "").strip())
         _section_label(label)
         _set_font(11)
         if body_text:
-            pdf.multi_cell(0, 7, body_text)
+            # 폭 0 = 우측 마진까지 사용 → 페이지 너비에 맞춰 자동 줄바꿈
+            pdf.multi_cell(0, 8, body_text)
         elif allow_empty_caption:
             pdf.set_text_color(120, 120, 120)
-            pdf.multi_cell(0, 7, "(내용 없음)")
+            pdf.multi_cell(0, 8, "(내용 없음)")
             pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
 
@@ -1751,12 +1775,20 @@ def build_comprehensive_portfolio_pdf(
         pdf.ln(3)
         pdf.set_draw_color(203, 213, 225)  # slate-300
         y = pdf.get_y()
-        pdf.line(15, y, 195, y)
+        # 좌/우 마진을 고려해 페이지 폭에 맞게 그린다.
+        left_x = pdf.l_margin
+        right_x = pdf.w - pdf.r_margin
+        pdf.line(left_x, y, right_x, y)
         pdf.set_draw_color(0, 0, 0)
         pdf.ln(4)
 
     def _embed_image_from_b64(b64: str) -> None:
-        """썸네일 base64 를 PDF 에 이미지로 임베딩한다."""
+        """썸네일 base64 를 PDF 에 이미지로 임베딩한다 (페이지 폭 안전).
+
+        - 이미지 폭을 사용 가능한 콘텐츠 폭(좌·우 마진 제외) 의 70% 로 제한.
+        - 이미지 높이가 남은 페이지보다 크면 자동으로 다음 페이지로 넘어가도록
+          ``pdf.set_auto_page_break(True)`` 가 이미 켜져 있음을 신뢰한다.
+        """
         img_bytes = thumbnail_b64_to_bytes(b64)
         if not img_bytes or PILImage is None:
             return
@@ -1765,9 +1797,9 @@ def build_comprehensive_portfolio_pdf(
                 im.load()
                 if im.mode != "RGB":
                     im = im.convert("RGB")
-                # fpdf2 는 PIL.Image 객체를 직접 받는다 (>=2.6)
-                # 폭 80mm 로 적당히 출력한다.
-                pdf.image(im, w=80)
+                content_w = pdf.w - pdf.l_margin - pdf.r_margin
+                target_w = min(80.0, content_w * 0.7)
+                pdf.image(im, w=target_w)
             pdf.ln(2)
         except Exception as exc:
             logger.warning("PDF 이미지 임베딩 실패: %s", exc)
@@ -1811,14 +1843,31 @@ def build_comprehensive_portfolio_pdf(
         pdf.add_page()
         guidance_text, evaluation_text = split_combined_result(rec.get("result") or "")
 
+        # NCS 성취도(이 회차 단일) 계산 — PDF 헤더에 노출
+        try:
+            ncs_data = calculate_ncs_scores(
+                evaluation_text or rec.get("reasoning") or "",
+                rec.get("mode") or "학습 모드",
+                guidance_text=guidance_text,
+            )
+            overall_rate = float(ncs_data.get("overall_rate") or 0.0)
+        except Exception:
+            overall_rate = 0.0
+
         # 실습 #N — 진한 컬러 헤더
         _set_font(16, bold=True)
         pdf.set_text_color(124, 45, 18)  # orange-900
-        pdf.multi_cell(0, 11, f"📓 실습 #{idx} / {total}")
+        pdf.multi_cell(0, 11, _safe_text(f"📓 실습 #{idx} / {total}"))
         pdf.set_text_color(0, 0, 0)
         _set_font(11)
-        pdf.multi_cell(0, 7, f"진단 일시: {rec.get('submitted_at') or '-'}")
-        pdf.multi_cell(0, 7, f"교과 · 단원: {rec.get('subject') or '-'}  >  {rec.get('unit') or '-'}")
+        # 메타 정보 — 모두 multi_cell 로 안전하게 출력
+        pdf.multi_cell(0, 8, _safe_text(f"진단 일시: {rec.get('submitted_at') or '-'}"))
+        pdf.multi_cell(
+            0, 8,
+            _safe_text(f"교과 · 단원: {rec.get('subject') or '-'}  >  {rec.get('unit') or '-'}"),
+        )
+        pdf.multi_cell(0, 8, _safe_text(f"학습 모드: {rec.get('mode') or '학습 모드'}"))
+        pdf.multi_cell(0, 8, _safe_text(f"NCS 성취도(이 회차): {overall_rate:.0f} / 100"))
         pdf.ln(2)
 
         # ① 수행 내용 — 학생 입력
@@ -1826,23 +1875,32 @@ def build_comprehensive_portfolio_pdf(
 
         # ② AI 코칭 — 가이드 요약
         guide_short = (guidance_text or "").strip()
-        if guide_short and len(guide_short) > 1200:
-            guide_short = guide_short[:1200] + " …"
+        if guide_short and len(guide_short) > 1500:
+            guide_short = guide_short[:1500] + " …"
         _write_block(
             "🧭 AI 코칭 — 미션 가이드 요약",
             guide_short or "(AI 가이드 텍스트가 저장되지 않았습니다.)",
         )
 
-        # ③ 수행 결과
+        # ③ 수행 결과 — 학생이 직접 입력한 측정/판정 요약
         _write_block("🧪 실습 수행 결과", rec.get("reasoning") or "")
 
-        # ④ 나의 소감
+        # ④ AI 평가 — 회차별 평가 카드 텍스트 요약
+        eval_short = (evaluation_text or "").strip()
+        if eval_short and len(eval_short) > 1500:
+            eval_short = eval_short[:1500] + " …"
+        _write_block(
+            "🏆 AI 평가 — 수행 평가 요약",
+            eval_short or "(AI 평가 텍스트가 저장되지 않았습니다.)",
+        )
+
+        # ⑤ 나의 소감
         _write_block(
             "📝 나의 소감",
             rec.get("reflection") or "",
         )
 
-        # ⑤ 첨부 사진 (있을 때만)
+        # ⑥ 첨부 사진 (있을 때만)
         image_b64 = (rec.get("image_b64") or "").strip()
         if image_b64:
             _section_label("📷 첨부 사진")
@@ -2178,12 +2236,168 @@ def refresh_my_history_cache() -> list[dict]:
     return records
 
 
+def _get_gsheets_secrets_summary() -> dict:
+    """Secrets 의 [connections.gsheets] 섹션 상태를 비밀번호 노출 없이 요약 반환."""
+    summary = {
+        "has_section": False,
+        "type": "(없음)",
+        "spreadsheet": "(없음)",
+        "client_email": "(없음)",
+    }
+    try:
+        gs = st.secrets["connections"]["gsheets"]
+    except Exception:
+        return summary
+    summary["has_section"] = True
+
+    def _g(k: str) -> str:
+        try:
+            v = gs.get(k) if hasattr(gs, "get") else gs[k]
+        except Exception:
+            v = None
+        return str(v or "").strip() or "(없음)"
+
+    summary["type"] = _g("type")
+    sp = _g("spreadsheet")
+    # URL 은 너무 길어 우측 끝 일부만 노출
+    if sp != "(없음)" and len(sp) > 64:
+        summary["spreadsheet"] = sp[:24] + "…" + sp[-24:]
+    else:
+        summary["spreadsheet"] = sp
+    summary["client_email"] = _g("client_email")
+    return summary
+
+
+def run_sheet_write_smoke_test() -> dict:
+    """history 시트에 'heartbeat' 행을 1줄 써 보고 즉시 다시 읽어 검증한다.
+
+    UI 에서 '🧪 시트 쓰기 테스트' 버튼을 누르면 호출된다. 실제 학습 데이터는 건들지
+    않고, ``student_id="__diag__"``, ``mode="diagnostic"`` 으로 식별 가능한 더미 행만
+    추가해 누적 통계에 영향이 없도록 한다.
+
+    Returns
+    -------
+    dict { "ok": bool, "error": str|None, "round_trip_seconds": float, "row": dict }
+    """
+    started = time.time()
+    test_record_id = str(uuid.uuid4())
+    heartbeat_record = {
+        "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "student_id": "__diag__",
+        "student_display_name": "diag-bot",
+        "subject": "자동차 전기전자제어",
+        "unit": "(쓰기 테스트)",
+        "result": "[diag] heartbeat OK",
+        "mode": "diagnostic",
+        "record_id": test_record_id,
+        "symptom": "(쓰기 테스트)",
+        "reasoning": "(쓰기 테스트)",
+        "reflection": "(쓰기 테스트)",
+        "image_b64": "",
+    }
+    try:
+        shb.append_history_from_record(heartbeat_record, 0.0)
+    except Exception as exc:
+        logger.exception("[DIAG] 시트 쓰기 테스트 실패: %s", exc)
+        return {"ok": False, "error": str(exc), "round_trip_seconds": time.time() - started, "row": {}}
+
+    # 캐시 무효화 후 즉시 다시 읽어 round-trip 검증
+    try:
+        shb.invalidate_all_sheet_caches()
+        df = shb.force_refresh_history()
+        rows = df[df["record_id"].astype(str).str.strip() == test_record_id].to_dict("records")
+        if not rows:
+            return {
+                "ok": False,
+                "error": "쓰기는 성공했으나 다시 읽기에서 해당 record_id 를 찾지 못했습니다. (캐시/권한 문제 가능)",
+                "round_trip_seconds": time.time() - started,
+                "row": {},
+            }
+        return {"ok": True, "error": None, "round_trip_seconds": time.time() - started, "row": rows[0]}
+    except Exception as exc:
+        logger.exception("[DIAG] 시트 쓰기 테스트 검증 단계 실패: %s", exc)
+        return {"ok": False, "error": f"쓰기 후 검증 실패: {exc}", "round_trip_seconds": time.time() - started, "row": {}}
+
+
+def render_db_diagnostic_panel() -> None:
+    """사이드바에 노출되는 '🔧 DB 저장 상태' 진단 패널.
+
+    학생/교사 누구나 클릭해서:
+      - 현재 Google Sheets 연결 모드(service_account 여부)
+      - 직전 저장 시도 결과(성공/실패/오류 메시지)
+      - '🧪 시트 쓰기 테스트' 로 즉시 round-trip 검증
+    을 확인할 수 있다.
+    """
+    with st.expander("🔧 DB 저장 상태", expanded=False):
+        ready = gs_app_sheets_ready()
+        summary = _get_gsheets_secrets_summary()
+        if ready and summary["type"] == "service_account":
+            st.markdown(
+                '<div style="background:#dcfce7;border:1px solid #22c55e;color:#14532d;'
+                'padding:0.45rem 0.7rem;border-radius:8px;font-size:0.85rem;">'
+                '✅ 쓰기 가능 모드 — service_account 자격증명이 적용되어 있습니다.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="background:#fee2e2;border:1px solid #ef4444;color:#7f1d1d;'
+                'padding:0.45rem 0.7rem;border-radius:8px;font-size:0.85rem;">'
+                '⚠ 쓰기 불가 모드 — Secrets 의 <code>type</code> 가 '
+                "<b>service_account</b> 가 아닙니다. 이 상태에서는 학습 결과가 "
+                "시트에 저장되지 않습니다.</div>",
+                unsafe_allow_html=True,
+            )
+        st.caption(
+            f"🔑 type: `{summary['type']}` · 📄 spreadsheet: `{summary['spreadsheet']}` · "
+            f"✉ client_email: `{summary['client_email']}`"
+        )
+
+        last = st.session_state.get("_last_save_status")
+        st.markdown("**직전 저장 결과**")
+        if not last:
+            st.caption("아직 저장 시도가 없습니다.")
+        elif last.get("ok"):
+            st.success(
+                f"✅ 성공 — {last.get('at')} · 단원 [{last.get('unit')}] · "
+                f"NCS {last.get('ncs_score')} (sid={last.get('sid')})"
+            )
+        else:
+            st.error(
+                f"❌ 실패 — {last.get('at')} · 단원 [{last.get('unit')}]\n\n"
+                f"오류: `{last.get('error')}`"
+            )
+
+        if st.button("🧪 시트 쓰기 테스트 실행", key="db_diag_smoke_test_btn",
+                      help="더미 'heartbeat' 행을 1줄 쓰고 즉시 다시 읽어 round-trip 을 확인합니다."):
+            with st.spinner("시트에 더미 행을 써 보고 다시 읽는 중…"):
+                result = run_sheet_write_smoke_test()
+            if result["ok"]:
+                st.success(
+                    f"✅ 쓰기/읽기 모두 OK ({result['round_trip_seconds']:.2f}초). "
+                    "현재 시트 연결은 정상입니다."
+                )
+                st.caption(
+                    "더미 행은 student_id='__diag__' · mode='diagnostic' 으로 표시되어 "
+                    "학생 누적 통계에는 포함되지 않습니다. (필요 시 시트에서 수동 삭제)"
+                )
+            else:
+                st.error(
+                    f"❌ 시트 쓰기 테스트 실패 — {result['error']}\n\n"
+                    "→ Secrets 의 `type='service_account'`, `private_key`(여러 줄 따옴표), "
+                    "그리고 `client_email` 이 대상 스프레드시트에 **편집자**로 공유되어 있는지 "
+                    "확인해 주세요."
+                )
+
+
 def get_my_history_records() -> list[dict]:
     """포트폴리오/사이드바 등에서 사용하는 표준 진입점.
 
     세션 캐시(`my_history_records`)가 있으면 그대로 사용하고, 비어 있으면
     시트에서 1회 강제 재동기화한다. 학번 타입 차이로 인한 누락을 방지하기 위해
     캐시된 결과도 학번을 한 번 더 정규화 비교해 안전하게 필터링한다.
+
+    또한 시트 쓰기 진단용 더미 행(``student_id='__diag__'`` 또는
+    ``mode='diagnostic'``)은 학생 통계/포트폴리오에서 자동 제외한다.
     """
     sid = _normalize_sid(st.session_state.get("student_id"))
     if not sid:
@@ -2192,27 +2406,106 @@ def get_my_history_records() -> list[dict]:
     if cached is None:
         cached = force_fetch_student_history(sid)
         st.session_state["my_history_records"] = cached
-    # 방어적 재필터링: 세션 캐시가 다른 학생 데이터를 들고 있는 사고 차단
-    return [r for r in cached if _normalize_sid(r.get("student_id")) == sid]
+
+    def _keep(rec: dict) -> bool:
+        if _normalize_sid(rec.get("student_id")) != sid:
+            return False
+        if (rec.get("mode") or "").strip().lower() == "diagnostic":
+            return False
+        if _normalize_sid(rec.get("student_id")) == "__diag__":
+            return False
+        return True
+
+    return [r for r in cached if _keep(r)]
 
 
 def append_diagnostic_record(record: dict) -> None:
     """진단 완료 시 history 시트에 append.
 
-    신 포맷 result는 ``compose_combined_result`` 로 가이드+평가를 한 필드에 합쳐 저장한다.
-    NCS 점수 계산 시 가이드를 분리해 충실도 기반 가중치를 적용한다.
+    저장되는 핵심 필드 (모두 누락 없이 시트에 들어가는지 매번 점검):
+      - ``record_id``      : 회차 고유 UUID
+      - ``submitted_at``   : 제출 일시
+      - ``student_id`` / ``student_display_name``
+      - ``subject`` / ``unit`` / ``mode``
+      - ``symptom``        : 학생이 입력한 [대상/상태/질문]
+      - ``reasoning``      : 학생의 실습 수행 결과
+      - ``result``         : compose_combined_result(guidance, evaluation) 합본
+                             → split_combined_result 로 가이드/평가를 다시 분리해 사용
+      - ``reflection``     : 오늘의 실습 소감
+      - ``image_b64``      : 첨부 사진 썸네일(base64 JPEG)
+
+    저장 결과(성공/실패)는 ``st.session_state["_last_save_status"]`` 에 영구 기록되어
+    st.rerun() 후에도 사이드바·메인 화면에서 사용자가 확인할 수 있다.
     """
+    sid = _normalize_sid(record.get("student_id"))
+
     if not gs_app_sheets_ready():
-        raise RuntimeError("Google Sheets에 연결할 수 없습니다. secrets.toml [connections.gsheets] 를 확인하세요.")
+        st.session_state["_last_save_status"] = {
+            "ok": False,
+            "at": now_kst_display() if "now_kst_display" in globals() else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "sid": sid,
+            "unit": record.get("unit") or "-",
+            "error": "Google Sheets에 연결할 수 없습니다. (Secrets [connections.gsheets] 미설정)",
+        }
+        raise RuntimeError(
+            "Google Sheets에 연결할 수 없습니다. "
+            "secrets.toml [connections.gsheets] 섹션과 service_account 자격 증명을 확인해 주세요."
+        )
+
     combined = record.get("result") or ""
     guidance_text, evaluation_text = split_combined_result(combined)
+
+    # 디버그용: 어떤 필드가 비어 들어가는지 콘솔에 명시. 누락 사고를 즉시 탐지한다.
+    logger.info(
+        "[APPEND] sid=%s unit=%s | reasoning=%dchar guidance=%dchar evaluation=%dchar reflection=%dchar image_b64=%s",
+        sid,
+        record.get("unit") or "-",
+        len(record.get("reasoning") or ""),
+        len(guidance_text or ""),
+        len(evaluation_text or ""),
+        len(record.get("reflection") or ""),
+        "있음" if (record.get("image_b64") or "").strip() else "없음",
+    )
+
     score_input_text = evaluation_text or combined
     ncs = calculate_ncs_scores(
         score_input_text,
         record.get("mode") or "학습 모드",
         guidance_text=guidance_text,
     )["overall_rate"]
-    shb.append_history_from_record(record, ncs)
+
+    try:
+        shb.append_history_from_record(record, ncs)
+    except Exception as exc:
+        # 실패 사유를 영구 기록해 st.rerun() 이후에도 보이도록 한다.
+        logger.exception("[APPEND] 시트 쓰기 실패 (sid=%s): %s", sid, exc)
+        st.session_state["_last_save_status"] = {
+            "ok": False,
+            "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "sid": sid,
+            "unit": record.get("unit") or "-",
+            "error": str(exc),
+        }
+        raise
+
+    # 성공 — 무엇이 저장됐는지 영구 기록
+    st.session_state["_last_save_status"] = {
+        "ok": True,
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sid": sid,
+        "unit": record.get("unit") or "-",
+        "record_id": record.get("record_id") or "",
+        "ncs_score": round(float(ncs), 2),
+    }
+    logger.info("[APPEND] 시트 쓰기 성공 — sid=%s unit=%s ncs=%.1f",
+                sid, record.get("unit") or "-", ncs)
+
+    # Streamlit 의 모든 @st.cache_data 결과를 무효화하여 포트폴리오 탭이
+    # 즉시 새 기록을 반영하도록 한다 (st-gsheets-connection 의 내부 캐시 포함).
+    try:
+        st.cache_data.clear()
+    except Exception as exc:
+        logger.warning("[APPEND] st.cache_data.clear() 실패 (무시): %s", exc)
 def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], list[float]]:
     if not records:
         return [], []
@@ -2456,6 +2749,9 @@ def complete_student_login(student_no: str, name: str) -> None:
     # 시트 캐시를 강제로 비우고 최신 데이터로 다시 채운다.
     try:
         shb.invalidate_all_sheet_caches()
+        # Streamlit 의 @st.cache_data 전역 캐시도 함께 비워 다른 컴포넌트의
+        # 옛 캐시(예: 학생 이름 룩업)가 새 학생 정보로 갱신되도록 한다.
+        st.cache_data.clear()
     except Exception as exc:
         logger.warning("[LOGIN] 시트 캐시 무효화 실패 (무시): %s", exc)
 
@@ -2864,7 +3160,8 @@ def _render_diagnosis_input_tab(
             st.session_state.latest_result = combined_result
             st.session_state.latest_mode = mode
             st.session_state.latest_generated_at = generated_at
-            st.session_state.diag_step = "result"
+            # ⚠ diag_step 은 시트 저장이 성공한 뒤에만 'result' 로 전환한다.
+            # 실패 시 학생이 다시 제출을 시도할 수 있도록 단계 2 화면을 유지한다.
             record = {
                 "record_id": str(uuid.uuid4()),
                 "submitted_at": generated_at,
@@ -2886,6 +3183,8 @@ def _render_diagnosis_input_tab(
             st.session_state.latest_reflection = (reflection or "").strip()
             try:
                 append_diagnostic_record(record)
+                # 저장이 성공해야만 단계 3 으로 진행한다.
+                st.session_state.diag_step = "result"
                 # ① 시트 측 캐시를 비우고 ② 학생 누적 이력을 즉시 다시 끌어와
                 # 포트폴리오/사이드바 카운트가 새 기록을 바로 반영하도록 한다.
                 shb.invalidate_all_sheet_caches()
@@ -2896,11 +3195,27 @@ def _render_diagnosis_input_tab(
                     len(refreshed),
                 )
                 st.session_state["_just_completed_step2"] = True
+                st.session_state["_save_banner_msg"] = (
+                    f"✅ 시트 저장 완료 — 단원 [{record.get('unit')}] · 누적 {len(refreshed)}건"
+                )
                 st.toast("📈 성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="🎉")
                 st.balloons()
+                # 성공 시에만 rerun → 단계 3 화면으로 전환
+                st.rerun()
             except Exception as sheet_exc:
-                st.warning(f"평가는 생성되었으나 Google Sheets 저장에 실패했습니다: {sheet_exc}")
-            st.rerun()
+                # 실패: rerun 하지 않고 화면에 오류를 영구 표시한다.
+                # diag_step 은 'guidance' 로 유지하여 학생이 다시 제출을 시도하거나
+                # 사이드바의 'DB 저장 상태'에서 사유를 확인할 수 있게 한다.
+                st.session_state.diag_step = "guidance"
+                st.session_state["_save_banner_msg"] = (
+                    f"❌ 시트 저장 실패: {sheet_exc}"
+                )
+                st.error(
+                    "구글 시트 저장에 실패했습니다. 사이드바의 **🔧 DB 저장 상태** 패널에서 "
+                    "원인을 확인하고, 같은 화면 하단의 **🧪 시트 쓰기 테스트** 버튼으로 "
+                    "연결 상태를 즉시 재진단해 주세요.\n\n"
+                    f"**오류 메시지:** `{sheet_exc}`"
+                )
         return
 
     # ──────────────────── [단계 3] 결과 표시 / 새 진단 ────────────────────
@@ -2926,7 +3241,11 @@ def _render_diagnosis_input_tab(
 
 
 def _render_diagnosis_feedback_tab() -> None:
-    """🔍 AI 코칭 탭: 단계별로 가이드/평가 카드를 보여주고, 완료 시 PDF 다운로드를 제공한다."""
+    """🔍 AI 코칭 탭: 단계별 가이드/평가 카드를 보여 준다.
+
+    회차별 PDF 다운로드 기능은 제거되었다. 모든 학기 누적 PDF 출력은
+    사이드바 메뉴의 **📓 나의 포트폴리오** 에서 한 번에 생성한다.
+    """
     st.subheader("🔍 AI 코칭 — 진단 가이드 & 수행 평가")
     diag_step = st.session_state.get("diag_step", "input")
     guidance_text = st.session_state.get("latest_guidance", "")
@@ -2945,39 +3264,21 @@ def _render_diagnosis_feedback_tab() -> None:
     if evaluation_text:
         st.markdown("---")
         render_evaluation_card(evaluation_text)
-    if evaluation_text:
+        # 회차별 PDF 다운로드는 제거. 학기말 통합 PDF 안내만 남긴다.
         st.markdown("---")
-        st.markdown("#### 포트폴리오 — 진단 결과 PDF 저장")
-        if FPDF is None:
-            st.info("PDF 저장 기능을 사용하려면 `pip install fpdf2`를 실행해 주세요.")
-            return
-        try:
-            ncs_data = calculate_ncs_scores(
-                st.session_state.get("latest_evaluation", "") or st.session_state.get("latest_execution_result", ""),
-                st.session_state.get("latest_mode", "학습 모드"),
-                guidance_text=st.session_state.get("latest_guidance", ""),
-            )
-            pdf_bytes = build_pdf_bytes(
-                generated_at=st.session_state.get("latest_generated_at")
-                or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                mode=st.session_state.get("latest_mode", "학습 모드"),
-                symptom=st.session_state.get("latest_symptom", ""),
-                result_text=st.session_state.get("latest_result", ""),
-                ncs_score=ncs_data["overall_rate"],
-                subject=st.session_state.get("latest_subject") or "",
-                unit=st.session_state.get("latest_unit") or "",
-                student_id=st.session_state.get("student_id") or "",
-                execution_result=st.session_state.get("latest_execution_result", ""),
-            )
-            st.download_button(
-                "진단 결과 PDF로 저장하기",
-                data=pdf_bytes,
-                file_name=f"portfolio_{st.session_state.get('student_id', 'student')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
-        except Exception as exc:
-            st.error(f"PDF 생성 중 오류가 발생했습니다: {exc}")
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,#ecfeff 0%,#cffafe 100%);'
+            'padding:1rem 1.2rem;border-radius:12px;border:1px solid #06b6d4;'
+            'margin-top:0.5rem;">'
+            '<div style="font-size:1.1rem;font-weight:700;color:#0e7490;">'
+            '💾 이번 실습 기록이 자동으로 저장되었습니다.</div>'
+            '<div style="font-size:0.98rem;color:#0e7490;margin-top:0.35rem;line-height:1.55;">'
+            '회차별 PDF 저장은 더 이상 제공되지 않습니다. '
+            '학기 동안 누적된 모든 실습은 사이드바의 '
+            '<b>📓 나의 포트폴리오</b> 메뉴에서 한 권의 PDF로 다운로드할 수 있습니다.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def _render_diagnosis_ncs_tab() -> None:
@@ -3026,6 +3327,30 @@ def _format_week_key(submitted_at: str) -> tuple[str, str]:
     return (label, f"{year}-W{week:02d}")
 
 
+def _compute_record_achievement(rec: dict) -> tuple[float, list[dict]]:
+    """단일 record 의 NCS 성취도(overall, 단원별 세부)를 계산해 반환.
+
+    Returns
+    -------
+    overall_rate : float (0~100)
+    unit_scores  : 해당 record 의 단원 점수 리스트 (calculate_ncs_scores 결과)
+    """
+    combined = rec.get("result") or ""
+    guidance_text, evaluation_text = split_combined_result(combined)
+    score_input_text = evaluation_text or combined or (rec.get("reasoning") or "")
+    if not score_input_text.strip():
+        return 0.0, []
+    try:
+        data = calculate_ncs_scores(
+            score_input_text,
+            rec.get("mode") or "학습 모드",
+            guidance_text=guidance_text,
+        )
+    except Exception:
+        return 0.0, []
+    return float(data.get("overall_rate") or 0.0), list(data.get("unit_scores") or [])
+
+
 def _render_portfolio_card(rec: dict) -> None:
     """포트폴리오 한 건의 expander 카드 — 날짜·단원·수행·AI 코칭·소감·사진을 깔끔하게 흐름 정리."""
     submitted_at = rec.get("submitted_at") or "-"
@@ -3033,24 +3358,58 @@ def _render_portfolio_card(rec: dict) -> None:
     time_part = submitted_at[11:16] if len(submitted_at) >= 16 else ""
     unit_name = rec.get("unit") or "-"
     icon = UNIT_ICONS.get(unit_name, "📘")
-    title = f"📅 {date_part} {time_part} · {icon} {unit_name}"
+
+    overall_rate, unit_scores = _compute_record_achievement(rec)
+    title = (
+        f"📅 {date_part} {time_part} · {icon} {unit_name}"
+        f" · 🎯 성취도 {overall_rate:.0f}점"
+    )
 
     with st.expander(title, expanded=False):
+        # ── 성취도 요약 (상단 메트릭 3종) ─────────────────────────────
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric("🎯 NCS 종합", f"{overall_rate:.0f} / 100")
+        with col_b:
+            unit_match = next(
+                (u for u in unit_scores if u.get("unit") == unit_name),
+                None,
+            )
+            unit_pct = float(unit_match.get("completion") or 0.0) * 100 if unit_match else overall_rate
+            st.metric("📘 단원 달성률", f"{unit_pct:.0f}%")
+        with col_c:
+            reflection_len = len((rec.get("reflection") or "").strip())
+            st.metric("📝 소감 분량", f"{reflection_len}자")
+
         # 수행 내용 — 학생이 입력한 [대상/상태/질문] 요약
         symptom = (rec.get("symptom") or "").strip()
         if symptom:
             st.markdown("**🔍 수행 내용 — 대상 / 상태 / 학습 질문**")
             st.code(symptom, language="text")
 
+        # 실습 수행 결과 — 학생이 직접 적은 측정/판정
+        reasoning = (rec.get("reasoning") or "").strip()
+        if reasoning:
+            st.markdown("**🧪 나의 실습 수행 결과**")
+            st.code(reasoning, language="text")
+
         # AI 코칭 — 가이드 텍스트의 앞부분(미션 요약 + 첫 카테고리)을 요약 노출
         combined = rec.get("result") or ""
-        guidance_text, _eval_text = split_combined_result(combined)
+        guidance_text, evaluation_text = split_combined_result(combined)
         if guidance_text.strip():
             st.markdown("**🧭 AI 코칭 — 미션 가이드 요약**")
             preview = guidance_text.strip()
             preview = preview[:600] + (" …" if len(preview) > 600 else "")
             with st.container(border=True):
                 st.markdown(preview)
+
+        # AI 평가 — 평가 카드(있을 때만 미리보기)
+        if evaluation_text.strip():
+            st.markdown("**🏆 AI 평가 — 수행 평가 요약**")
+            eval_preview = evaluation_text.strip()
+            eval_preview = eval_preview[:600] + (" …" if len(eval_preview) > 600 else "")
+            with st.container(border=True):
+                st.markdown(eval_preview)
 
         # 나의 소감 — 노란 하이라이트 카드
         reflection = (rec.get("reflection") or "").strip()
@@ -3226,6 +3585,17 @@ def render_student_mode() -> None:
 
     # ── '평가 모드'는 메뉴에서 제거되었지만 AI 호출 인자는 그대로 살려 학습 톤을 적용한다. ──
     mode = "학습 모드"
+
+    # ── 저장 결과 영구 배너 (st.rerun() 으로 메시지가 사라지는 사고 방지) ──
+    save_banner = st.session_state.get("_save_banner_msg")
+    if save_banner:
+        if save_banner.startswith("✅"):
+            st.success(save_banner)
+        else:
+            st.error(save_banner)
+        if st.button("배너 닫기", key="dismiss_save_banner_btn"):
+            st.session_state.pop("_save_banner_msg", None)
+            st.rerun()
 
     # ── 사이드바 메뉴 분기 ──
     if "포트폴리오" in view:
@@ -3543,6 +3913,8 @@ with st.sidebar:
         st.rerun()
     if st.session_state.app_role == "teacher" and st.session_state.get("teacher_logged_in"):
         render_teacher_password_sidebar()
+        # 교사도 DB 저장 상태를 즉시 진단할 수 있게 동일 패널을 노출한다.
+        render_db_diagnostic_panel()
     if st.session_state.app_role == "student" and st.session_state.get("student_logged_in"):
         st.markdown("---")
         st.markdown("#### 학생 계정")
@@ -3571,6 +3943,8 @@ with st.sidebar:
             if st.button("로그아웃", key="student_logout_btn"):
                 reset_student_session_soft()
                 st.rerun()
+        # 시트 쓰기/읽기 진단 패널 — 학습 결과가 시트에 저장되지 않을 때 즉시 원인 파악
+        render_db_diagnostic_panel()
 if st.session_state.app_role == "teacher":
     if not st.session_state.get("teacher_logged_in"):
         st.title("자동차 전기전자제어 — 교사 모드")
