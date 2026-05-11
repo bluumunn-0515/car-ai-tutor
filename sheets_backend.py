@@ -92,13 +92,20 @@ def _ensure_private_mode_for_write() -> Any:
 # ---------------------------------------------------------------------------
 def _normalize_df(df: Optional[pd.DataFrame], cols: list[str]) -> pd.DataFrame:
     if df is None or df.empty:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame({c: pd.Series(dtype="object") for c in cols})
     # 컬럼명 공백 제거
     df.columns = [str(c).strip() for c in df.columns]
     # 누락된 컬럼 생성
     for c in cols:
-        if c not in df.columns: df[c] = ""
-    return df[cols]
+        if c not in df.columns:
+            df[c] = ""
+    # 모든 셀을 문자열로 정규화 → 학번이 int로 추론되어 비교가 어긋나는 사고를 원천 차단
+    out = df[cols].copy()
+    for c in cols:
+        out[c] = out[c].apply(
+            lambda v: "" if (v is None or (isinstance(v, float) and pd.isna(v))) else str(v)
+        ).astype(str).str.strip()
+    return out
 
 def read_users_df() -> pd.DataFrame:
     now = time.time()
@@ -186,13 +193,83 @@ def read_history_df() -> pd.DataFrame:
     st.session_state._gs_history_ts = now
     return df
 
+_HISTORY_SHEET_TO_APP_KEY = {
+    # 시트의 raw 컬럼명 → 앱(app.py)이 기대하는 record 키
+    "datetime": "submitted_at",
+    "name": "student_display_name",
+    "diagnosis_result": "result",
+}
+
+
+def _adapt_history_row_to_app(row: dict[str, Any]) -> dict[str, Any]:
+    """sheet 컬럼명을 app.py 표준 record 키로 번역.
+
+    - 'datetime' → 'submitted_at'
+    - 'name'     → 'student_display_name'
+    - 'diagnosis_result' → 'result'
+
+    기존 코드가 둘 다 참조할 수 있도록 **양쪽 키를 모두** 채워 둔다(이중 키).
+    이렇게 해야 시트에서 불러온 누적 이력이 포트폴리오·교사 대시보드·
+    PDF 빌더 등 어떤 호출부에서도 빠짐없이 표시된다.
+    """
+    out = dict(row)
+    for sheet_key, app_key in _HISTORY_SHEET_TO_APP_KEY.items():
+        val = row.get(sheet_key, "")
+        if app_key not in out or not out.get(app_key):
+            out[app_key] = val
+    # 학번도 비교 안전성을 위해 정규화된 사본을 함께 보관
+    out["student_id"] = str(row.get("student_id", "")).strip()
+    return out
+
+
 def history_df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    if df is None or df.empty: return []
-    return df.to_dict('records')
+    """history 시트 DataFrame을 app.py 표준 record dict 리스트로 변환.
+
+    누적 이력의 컬럼명을 앱 전체에서 일관되게 다룰 수 있도록
+    시트 → 앱 키로 번역(adapt)한 결과를 반환한다.
+    """
+    if df is None or df.empty:
+        return []
+    return [_adapt_history_row_to_app(r) for r in df.to_dict('records')]
 
 def invalidate_all_sheet_caches() -> None:
     st.session_state.pop("_gs_users_df", None)
+    st.session_state.pop("_gs_users_ts", None)
     st.session_state.pop("_gs_history_df", None)
+    st.session_state.pop("_gs_history_ts", None)
+
+
+def force_refresh_history() -> pd.DataFrame:
+    """캐시를 무시하고 history 시트를 강제로 다시 읽어온다."""
+    st.session_state.pop("_gs_history_df", None)
+    st.session_state.pop("_gs_history_ts", None)
+    return read_history_df()
+
+
+def force_refresh_users() -> pd.DataFrame:
+    """캐시를 무시하고 users 시트를 강제로 다시 읽어온다."""
+    st.session_state.pop("_gs_users_df", None)
+    st.session_state.pop("_gs_users_ts", None)
+    return read_users_df()
+
+
+def filter_history_records_by_student(student_id: Any) -> list[dict[str, Any]]:
+    """주어진 student_id 와 일치하는 누적 history 기록을 app 표준 키로 반환.
+
+    - 시트의 학번이 int / float / str 어느 형태로 추론되더라도 안전하게 비교한다.
+    - 호출 직전 캐시를 무효화하여 최신 시트 상태를 강제로 다시 읽는다.
+    - 반환되는 dict 는 `history_df_to_records` 와 동일하게 app 표준 키
+      (`submitted_at`, `student_display_name`, `result` 등)를 포함한다.
+    """
+    sid_target = str(student_id or "").strip()
+    if not sid_target:
+        return []
+    df = force_refresh_history()
+    if df is None or df.empty:
+        return []
+    mask = df["student_id"].astype(str).str.strip() == sid_target
+    rows = df.loc[mask].to_dict("records")
+    return [_adapt_history_row_to_app(r) for r in rows]
 
 def update_teacher_feedback_in_sheet(record_id: str, feedback: str, updated_at: str) -> None:
     conn = _ensure_private_mode_for_write()

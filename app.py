@@ -279,6 +279,12 @@ def reset_student_session_soft() -> None:
                 del st.session_state[k]
             except Exception:
                 pass
+    # 다른 학생이 같은 브라우저로 로그인할 때 이전 학생의 누적 캐시가 새지 않도록 비운다.
+    st.session_state["my_history_records"] = None
+    try:
+        shb.invalidate_all_sheet_caches()
+    except Exception:
+        pass
     reset_diagnosis_flow()
 
 
@@ -2124,6 +2130,72 @@ def get_diagnostic_records() -> list[dict]:
         return []
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 학생 누적 이력(History) 영속성 보장 헬퍼
+#
+# 핵심 원칙:
+#   1) 학생이 로그인하면 즉시 `force_fetch_student_history` 로 시트를 강제 재읽기
+#      → `_gs_history_df` 세션 캐시를 무효화하고 최신 상태를 가져온다.
+#   2) 학번 비교는 항상 `str(...).strip()` 으로 정규화하여 int/str 추론 차이로
+#      필터가 누락되는 사고를 막는다.
+#   3) 조회 결과는 `st.session_state["my_history_records"]` 에 보관해 포트폴리오,
+#      대시보드, 사이드바 카운트가 동일한 단일 출처(single source of truth)를 본다.
+# ─────────────────────────────────────────────────────────────────────────────
+def _normalize_sid(student_id: Any) -> str:
+    """학번 비교용 표준화: 항상 trim 된 문자열로 통일."""
+    return str(student_id or "").strip()
+
+
+def force_fetch_student_history(student_id: Any) -> list[dict]:
+    """시트 캐시를 무효화하고 해당 student_id 의 모든 누적 기록을 다시 읽어 반환.
+
+    실패 시에도 예외를 위로 던지지 않고 빈 리스트를 반환해 UI 흐름을 끊지 않는다.
+    상세 원인은 logger.exception 으로 콘솔에 남긴다.
+    """
+    sid = _normalize_sid(student_id)
+    if not sid:
+        return []
+    if not gs_app_sheets_ready():
+        logger.warning("force_fetch_student_history: Google Sheets 미연결 → 빈 결과 반환 (sid=%s)", sid)
+        return []
+    try:
+        records = shb.filter_history_records_by_student(sid)
+    except Exception as exc:
+        logger.exception("force_fetch_student_history 실패 (sid=%s): %s", sid, exc)
+        st.session_state["_gsheets_read_error"] = str(exc)
+        return []
+    return records
+
+
+def refresh_my_history_cache() -> list[dict]:
+    """현재 로그인 학생의 누적 기록을 강제로 새로 읽어 세션 캐시에 반영."""
+    sid = _normalize_sid(st.session_state.get("student_id"))
+    if not sid:
+        st.session_state["my_history_records"] = []
+        return []
+    records = force_fetch_student_history(sid)
+    st.session_state["my_history_records"] = records
+    return records
+
+
+def get_my_history_records() -> list[dict]:
+    """포트폴리오/사이드바 등에서 사용하는 표준 진입점.
+
+    세션 캐시(`my_history_records`)가 있으면 그대로 사용하고, 비어 있으면
+    시트에서 1회 강제 재동기화한다. 학번 타입 차이로 인한 누락을 방지하기 위해
+    캐시된 결과도 학번을 한 번 더 정규화 비교해 안전하게 필터링한다.
+    """
+    sid = _normalize_sid(st.session_state.get("student_id"))
+    if not sid:
+        return []
+    cached = st.session_state.get("my_history_records")
+    if cached is None:
+        cached = force_fetch_student_history(sid)
+        st.session_state["my_history_records"] = cached
+    # 방어적 재필터링: 세션 캐시가 다른 학생 데이터를 들고 있는 사고 차단
+    return [r for r in cached if _normalize_sid(r.get("student_id")) == sid]
+
+
 def append_diagnostic_record(record: dict) -> None:
     """진단 완료 시 history 시트에 append.
 
@@ -2366,11 +2438,39 @@ def render_teacher_mode() -> None:
 
 
 def complete_student_login(student_no: str, name: str) -> None:
-    """가입/로그인 성공 후 세션에 반영한다."""
+    """가입/로그인 성공 후 세션에 반영한다.
+
+    추가 책임:
+      - Google Sheets 캐시(`_gs_history_df`, `_gs_users_df`)를 모두 무효화.
+      - `history` 탭에서 해당 학번의 누적 기록을 즉시 강제 동기화하여
+        `st.session_state["my_history_records"]` 에 캐싱.
+      - 로그인 직후 누적 실습 건수를 콘솔(logger.info)에 기록해
+        DB 동기화 상태를 운영자가 즉시 확인할 수 있도록 한다.
+    """
     reset_student_auth_form()
+    sid_norm = _normalize_sid(student_no)
     st.session_state.student_logged_in = True
-    st.session_state.student_id = student_no
+    st.session_state.student_id = sid_norm
     st.session_state.student_display_name = name
+
+    # 시트 캐시를 강제로 비우고 최신 데이터로 다시 채운다.
+    try:
+        shb.invalidate_all_sheet_caches()
+    except Exception as exc:
+        logger.warning("[LOGIN] 시트 캐시 무효화 실패 (무시): %s", exc)
+
+    try:
+        my_records = force_fetch_student_history(sid_norm)
+    except Exception as exc:
+        logger.exception("[LOGIN] 학생 %s 누적 이력 동기화 실패: %s", sid_norm, exc)
+        my_records = []
+
+    st.session_state["my_history_records"] = my_records
+    logger.info(
+        "[LOGIN] 학생 %s (%s) 누적 실습 이력 %d건을 시트에서 동기화 완료.",
+        sid_norm, name, len(my_records),
+    )
+
     st.rerun()
 
 
@@ -2786,7 +2886,15 @@ def _render_diagnosis_input_tab(
             st.session_state.latest_reflection = (reflection or "").strip()
             try:
                 append_diagnostic_record(record)
+                # ① 시트 측 캐시를 비우고 ② 학생 누적 이력을 즉시 다시 끌어와
+                # 포트폴리오/사이드바 카운트가 새 기록을 바로 반영하도록 한다.
                 shb.invalidate_all_sheet_caches()
+                refreshed = refresh_my_history_cache()
+                logger.info(
+                    "[APPEND] 학생 %s 새 기록 저장 후 누적 이력 %d건으로 재동기화 완료.",
+                    _normalize_sid(st.session_state.get("student_id")),
+                    len(refreshed),
+                )
                 st.session_state["_just_completed_step2"] = True
                 st.toast("📈 성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="🎉")
                 st.balloons()
@@ -2998,7 +3106,20 @@ def _render_portfolio_view() -> None:
         st.info("Google Sheets 연결 준비 중입니다. 잠시 후 다시 시도해 주세요.")
         return
 
-    all_records = [r for r in get_diagnostic_records() if r.get("student_id") == student_id]
+    # 학번 타입 차이로 인한 누락을 방지하기 위해 정규화된 비교 + 강제 동기화 헬퍼 사용.
+    # 사용자가 "🔄 시트에서 새로 불러오기" 버튼을 누르면 캐시를 무시하고 다시 읽는다.
+    col_refresh, col_meta = st.columns([1, 4])
+    with col_refresh:
+        if st.button("🔄 시트에서 새로 불러오기", key="portfolio_force_refresh",
+                     help="구글 시트 history 탭을 강제로 다시 읽어 누적 기록을 새로고침합니다."):
+            refreshed = refresh_my_history_cache()
+            st.success(f"새로 불러온 누적 실습 이력: {len(refreshed)}건")
+    with col_meta:
+        st.caption(
+            f"🔗 연결된 학생: **{student_name}** · 학번 `{_normalize_sid(student_id)}`"
+        )
+
+    all_records = get_my_history_records()
     if not all_records:
         st.info(
             "아직 저장된 실습 기록이 없습니다. 사이드바의 **[🧑‍🏫 학습 모드]**에서 첫 실습을 시작해 보세요!"
@@ -3175,6 +3296,9 @@ def init_session_state() -> None:
         "latest_execution_result": "",
         "latest_reflection": "",
         "latest_image_b64": "",
+        # 누적 history 캐시 — 로그인 직후 force_fetch_student_history 로 채워진다.
+        # None = 아직 동기화 전, [] = 동기화 완료(0건)
+        "my_history_records": None,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -3423,9 +3547,30 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("#### 학생 계정")
         st.caption(f"**{st.session_state.get('student_display_name') or '-'}** · 학번 `{st.session_state.get('student_id') or '-'}`")
-        if st.button("로그아웃 (다른 학생으로 로그인)", key="student_logout_btn"):
-            reset_student_session_soft()
-            st.rerun()
+        # ── DB 연결 확인용: 현재 캐시에 보관 중인 누적 실습 이력 수를 노출 ──
+        try:
+            _my_records_count = len(get_my_history_records())
+        except Exception:
+            _my_records_count = 0
+        st.markdown(
+            f'<div style="font-size:0.85rem;color:#1e293b;background:#f1f5f9;'
+            f'border:1px solid #cbd5e1;border-radius:8px;padding:0.45rem 0.7rem;'
+            f'margin:0.3rem 0 0.55rem 0;">'
+            f'📚 현재 연결된 누적 실습 이력: <b style="color:#1d4ed8;">{_my_records_count}건</b>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        c_sync, c_out = st.columns(2)
+        with c_sync:
+            if st.button("🔄 동기화", key="student_sync_btn",
+                          help="구글 시트 history 탭에서 내 기록을 다시 끌어옵니다."):
+                refreshed = refresh_my_history_cache()
+                st.toast(f"누적 실습 이력 {len(refreshed)}건을 다시 불러왔어요.", icon="📚")
+                st.rerun()
+        with c_out:
+            if st.button("로그아웃", key="student_logout_btn"):
+                reset_student_session_soft()
+                st.rerun()
 if st.session_state.app_role == "teacher":
     if not st.session_state.get("teacher_logged_in"):
         st.title("자동차 전기전자제어 — 교사 모드")
