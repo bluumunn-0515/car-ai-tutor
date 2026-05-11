@@ -41,6 +41,15 @@ NCS_UNITS = [
 CURRICULUM = {
     "자동차 전기전자제어": list(NCS_UNITS),
 }
+# 단원별 직관 아이콘 — 카드/배지/라디오 라벨에 활용
+UNIT_ICONS = {
+    "자동차 전기전자장치 고장진단": "🔧",
+    "배터리 점검": "🔋",
+    "시동·충전장치 점검": "🚗",
+    "조명장치 점검": "💡",
+    "편의장치 점검": "🪑",
+    "네트워크 장치 점검": "🛰️",
+}
 # NCS 학습모듈(LM1506030101/102/104/105/106/108) 및 '자동차 전기·전자 제어 2022(보안)'
 # 교과서의 수행준거·핵심 용어를 추출하여 단원별 루브릭 키워드로 구성
 NCS_RUBRIC = {
@@ -730,28 +739,57 @@ def _render_legacy_feedback(result_text: str, mode: str) -> None:
 
 
 def render_mission_card(guidance_text: str) -> None:
-    """[단계 1] AI 미션/가이드 카드 렌더링.
-
-    프롬프트가 지시한 마크다운(##, 표, 불렛)을 그대로 렌더하되, 카드 컨테이너로 감싼다.
-    """
+    """[단계 1] AI 미션 카드 — 'AI 튜터의 비밀 지령' 컨셉으로 chat_message 안에 테두리 박스를 렌더한다."""
     if not guidance_text or not guidance_text.strip():
         st.caption("아직 생성된 가이드가 없습니다.")
         return
-    with st.container(border=True):
-        st.markdown("### 🧭 **AI 진단 가이드 (Mission)**")
-        st.caption("나침반(Compass)처럼 학습 방향을 잡아 주는 미션 카드 — 정답이 아니라 '진단 방향'과 '측정/점검 방법'을 안내합니다.")
-        st.markdown(guidance_text)
+    with st.chat_message("assistant", avatar="🧭"):
+        st.markdown(
+            """
+            <div style="
+                background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
+                color:#fef3c7;
+                padding:0.6rem 1rem;
+                border-radius:10px;
+                font-weight:700;
+                letter-spacing:0.02em;
+                margin-bottom:0.6rem;
+                box-shadow:0 2px 8px rgba(15,23,42,0.25);">
+                🤫 AI 튜터의 비밀 지령 — Mission Briefing
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption("정답은 아니야. 너만의 진단 미션이지. 표(Table)와 미션 단계대로 차근차근 따라가 봐!")
+        with st.container(border=True):
+            st.markdown(guidance_text)
 
 
 def render_evaluation_card(evaluation_text: str) -> None:
-    """[단계 2] 실습 수행 평가 카드 렌더링."""
+    """[단계 2] 실습 수행 평가 카드 — 챗 메시지 형태로 점수표를 강조한다."""
     if not evaluation_text or not evaluation_text.strip():
         st.caption("아직 생성된 평가가 없습니다.")
         return
-    with st.container(border=True):
-        st.markdown("##### 📝 실습 수행 평가 (Step 2 Result)")
-        st.caption("[단계 1] 가이드 대비 학생 수행 결과의 충실도와 NCS 정렬도를 평가합니다.")
-        st.markdown(evaluation_text)
+    with st.chat_message("assistant", avatar="📝"):
+        st.markdown(
+            """
+            <div style="
+                background:linear-gradient(135deg,#065f46 0%,#10b981 100%);
+                color:#ecfdf5;
+                padding:0.6rem 1rem;
+                border-radius:10px;
+                font-weight:700;
+                letter-spacing:0.02em;
+                margin-bottom:0.6rem;
+                box-shadow:0 2px 8px rgba(6,95,70,0.25);">
+                🏆 미션 수행 평가 — Result Report
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption("가이드 대비 충실도와 NCS 수행준거 정렬도를 표로 정리한 평가 카드입니다.")
+        with st.container(border=True):
+            st.markdown(evaluation_text)
 
 
 def render_feedback_cards(result_text: str, mode: str) -> None:
@@ -790,7 +828,7 @@ def render_photo_upload_checklist(selected_unit: Optional[str] = None) -> None:
         "가능하면 부품 주변 위치(엔진룸 내 상대 위치)도 함께 보이게 촬영했나요?",
     ]
     unit_items = UNIT_PHOTO_CHECKLISTS.get(selected_unit or "", [])
-    with st.expander("촬영 전 체크리스트 (권장)", expanded=True):
+    with st.expander("촬영 전 체크리스트 (권장)", expanded=False):
         st.markdown("**공통 체크리스트**")
         st.markdown("\n".join(f"- {item}" for item in common_items))
         if unit_items:
@@ -1559,9 +1597,9 @@ def render_student_login() -> None:
 
 
 _DIAG_STEPS = [
-    ("input", "1단계 · 학습 과제 입력", "부품·증상·학습 질문을 입력합니다."),
-    ("guidance", "2단계 · 미션 수행 & 결과 기록", "AI 미션(나침반)을 따라 실측한 결과를 입력합니다."),
-    ("result", "3단계 · 성취도 분석 & 피드백", "수행 충실도·NCS 정렬을 분석합니다."),
+    ("input", "📝 입력", "부품·증상·학습 질문"),
+    ("guidance", "🎯 미션 수행", "AI 미션 따라 실측·기록"),
+    ("result", "🏆 완료", "성취도 분석 & 피드백"),
 ]
 
 
@@ -1573,20 +1611,60 @@ def _diag_step_index(step: str) -> int:
 
 
 def _render_diagnosis_progress(step: str) -> None:
-    """단계별 진행 상황 안내 + 진행 바."""
+    """게임 퀘스트 스타일 스테이트 배지 + 진행 바."""
     idx = _diag_step_index(step)
-    cols = st.columns(len(_DIAG_STEPS))
-    for col_idx, (key, label, desc) in enumerate(_DIAG_STEPS):
+    total = len(_DIAG_STEPS)
+    progress_value = (idx + 1) / total
+    st.progress(progress_value, text=f"퀘스트 진행률 · {int(progress_value*100)}%  ({idx+1}/{total} 단계)")
+
+    cols = st.columns(total)
+    for col_idx, (_key, label, desc) in enumerate(_DIAG_STEPS):
         with cols[col_idx]:
             if col_idx < idx:
-                st.markdown(f"**✅ {label}**")
+                bg = "linear-gradient(135deg,#dcfce7 0%,#86efac 100%)"
+                border = "#16a34a"
+                text_color = "#14532d"
+                state_icon = "✅"
+                state_text = "Cleared"
+                glow = "box-shadow: 0 2px 6px rgba(22,163,74,0.18);"
+                opacity = "1"
             elif col_idx == idx:
-                st.markdown(f"**🟦 {label}**")
+                bg = "linear-gradient(135deg,#fef9c3 0%,#fde68a 50%,#fbbf24 100%)"
+                border = "#f59e0b"
+                text_color = "#7c2d12"
+                state_icon = "🔥"
+                state_text = "진행 중"
+                glow = "box-shadow: 0 0 0 4px rgba(251,191,36,0.25), 0 4px 14px rgba(245,158,11,0.45);"
+                opacity = "1"
             else:
-                st.markdown(f":gray[⬜ {label}]")
-            st.caption(desc)
-    progress_value = (idx + 1) / len(_DIAG_STEPS)
-    st.progress(progress_value)
+                bg = "#f1f5f9"
+                border = "#cbd5e1"
+                text_color = "#94a3b8"
+                state_icon = "🔒"
+                state_text = "Locked"
+                glow = ""
+                opacity = "0.65"
+            badge_html = f"""
+            <div style="
+                background:{bg};
+                border:2px solid {border};
+                border-radius:14px;
+                padding:0.75rem 0.55rem;
+                text-align:center;
+                {glow}
+                opacity:{opacity};
+                min-height:120px;
+                display:flex;
+                flex-direction:column;
+                justify-content:center;
+            ">
+                <div style="font-size:1.35rem; line-height:1;">{state_icon}</div>
+                <div style="font-weight:700; color:{text_color}; font-size:1rem; margin-top:0.35rem;">{label}</div>
+                <div style="font-size:0.78rem; color:{text_color}; margin-top:0.2rem; opacity:0.9;">{desc}</div>
+                <div style="font-size:0.72rem; color:{text_color}; margin-top:0.35rem; font-weight:600; letter-spacing:0.05em;">{state_text}</div>
+            </div>
+            """
+            st.markdown(badge_html, unsafe_allow_html=True)
     st.markdown("")
 
 
@@ -1601,9 +1679,6 @@ def _render_diagnosis_input_tab(
 
     # ──────────────────── [단계 1] 입력 폼 ────────────────────
     if diag_step == "input":
-        st.subheader("① 진단 입력")
-        st.caption("부품과 증상을 적은 뒤 [1단계: AI 가이드 받기]를 누르면, AI 튜터가 측정 미션을 안내해 줍니다.")
-        render_photo_upload_checklist(selected_unit)
         hints = UNIT_INPUT_HINTS.get(
             selected_unit,
             {
@@ -1612,34 +1687,55 @@ def _render_diagnosis_input_tab(
                 "question": "예: 가장 헷갈리는 부분을 적어 주세요",
             },
         )
-        target_part = st.text_input(
-            "① 대상 부품 — 점검 중인 부품이 무엇인가요?",
-            placeholder=hints["target"],
-            key="diag_target_part",
-            help="회로도 상의 부품 이름이나 커넥터 번호를 함께 적으면 더 정확한 안내가 가능합니다.",
-        )
-        current_state = st.text_area(
-            "② 현재 상태 — 어떤 증상/측정값이 나타나나요?",
-            placeholder=hints["state"],
-            height=120,
-            key="diag_current_state",
-            help="멀티미터/스캐너로 측정한 값, 작동·미작동 상황, DTC 코드 등을 구체적으로 적어 주세요.",
-        )
-        learning_question = st.text_area(
-            "③ 학습 질문 — 가장 궁금하거나 해결하기 어려운 부분은 무엇인가요?",
-            placeholder=hints["question"],
-            height=100,
-            key="diag_learning_question",
-            help="AI 튜터가 이 질문을 우선 다뤄 힌트를 줍니다(정답을 바로 알려주지는 않아요).",
-        )
+
+        # ─── 오늘의 수행 과제 카드 ───
+        with st.container(border=True):
+            st.markdown(f"### 📝 오늘의 수행 과제  ·  {UNIT_ICONS.get(selected_unit, '📘')} {selected_unit}")
+            st.caption("아래 3가지만 짧게 적어 주세요. 자세한 가이드는 ❓ 도움말 아이콘을 눌러 확인할 수 있어요.")
+
+            st.markdown("**🔍 [대상]  어디를 점검하나요?**")
+            target_part = st.text_input(
+                "대상 부품",
+                placeholder=hints["target"],
+                key="diag_target_part",
+                label_visibility="collapsed",
+                help="회로도 상의 부품 이름이나 커넥터 번호(예: E12)를 함께 적으면 더 정확한 안내가 가능합니다.",
+            )
+
+            st.markdown("**⚡ [상태]  지금 증상이 어떤가요?**")
+            current_state = st.text_area(
+                "현재 상태",
+                placeholder=hints["state"],
+                height=110,
+                key="diag_current_state",
+                label_visibility="collapsed",
+                help="멀티미터/스캐너로 측정한 값, 작동·미작동 상황, DTC 코드 등을 구체적으로 적어 주세요.",
+            )
+
+            st.markdown("**❓ [질문]  무엇이 궁금한가요?**")
+            learning_question = st.text_area(
+                "학습 질문",
+                placeholder=hints["question"],
+                height=90,
+                key="diag_learning_question",
+                label_visibility="collapsed",
+                help="AI 튜터가 이 질문을 우선 다뤄 힌트를 줍니다(정답을 바로 알려주지는 않아요).",
+            )
+
         symptom_text = compose_structured_symptom(target_part, current_state, learning_question)
-        uploaded_image = st.file_uploader(
-            "부품/측정 사진 업로드 (선택)",
-            type=["png", "jpg", "jpeg", "webp"],
-            key="diag_uploaded_image",
-        )
-        if uploaded_image is not None:
-            st.image(uploaded_image, caption="업로드된 사진", use_container_width=True)
+
+        # ─── 사진 업로드 (선택, 평소엔 접힘) ───
+        with st.expander("📸 부품/측정 사진 업로드 (선택)", expanded=False):
+            uploaded_image = st.file_uploader(
+                "사진 첨부",
+                type=["png", "jpg", "jpeg", "webp"],
+                key="diag_uploaded_image",
+                label_visibility="collapsed",
+            )
+            if uploaded_image is not None:
+                st.image(uploaded_image, caption="업로드된 사진", use_container_width=True)
+            render_photo_upload_checklist(selected_unit)
+
         run_step1 = st.button("🚀 1단계: AI 가이드 받기", type="primary", use_container_width=True)
         if run_step1:
             if genai is None:
@@ -1875,11 +1971,10 @@ def _render_diagnosis_ncs_tab() -> None:
 
 
 def _render_student_growth_dashboard() -> None:
-    """학생 본인의 누적 실습 기록을 요약해 보여주는 '나의 학습 성장 대시보드'."""
+    """학생 본인의 누적 실습 기록을 메트릭 + 레이더 중심으로 시각화한 '성장 대시보드'."""
     student_id = st.session_state.get("student_id") or ""
     student_name = (st.session_state.get("student_display_name") or "").strip() or student_id
     with st.expander("📈 나의 학습 성장 대시보드", expanded=True):
-        st.caption("지금까지의 실습 누적 데이터를 단원별 횟수와 개인 성취도 레이더로 요약해 보여줍니다.")
         my_records = [
             r for r in get_diagnostic_records()
             if r.get("student_id") == student_id
@@ -1887,67 +1982,97 @@ def _render_student_growth_dashboard() -> None:
         if not my_records:
             st.info("첫 실습을 시작해보세요!")
             return
-        if FPDF is None:
-            st.caption("📌 종합 포트폴리오 PDF 추출을 사용하려면 `pip install fpdf2`를 실행해 주세요.")
+
+        # ─── 핵심 메트릭 4종 ───
+        total_count = len(my_records)
+        labels, values = compute_class_average_unit_scores(my_records)
+        avg_score = sum(values) / len(values) if values else 0.0
+
+        if values:
+            best_idx = max(range(len(values)), key=lambda i: values[i])
+            weak_idx = min(range(len(values)), key=lambda i: values[i])
+            best_unit = f"{labels[best_idx]} {values[best_idx]:.0f}%"
+            weak_unit = f"{labels[weak_idx]} {values[weak_idx]:.0f}%"
         else:
-            try:
-                portfolio_bytes = build_comprehensive_portfolio_pdf(
-                    student_id=student_id,
-                    student_name=student_name,
-                    records=my_records,
-                )
-                st.download_button(
-                    "🎓 종합 포트폴리오 PDF 추출",
-                    data=portfolio_bytes,
-                    file_name=(
-                        f"comprehensive_portfolio_{student_id or 'student'}_"
-                        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                    ),
-                    mime="application/pdf",
-                    use_container_width=True,
-                    help="지금까지 누적된 모든 실습 기록을 한 권의 PDF 포트폴리오로 합쳐 내려받습니다.",
-                )
-            except Exception as exc:
-                st.error(f"종합 포트폴리오 PDF 생성 중 오류가 발생했습니다: {exc}")
-        col_left, col_right = st.columns([1, 1])
-        with col_left:
-            st.markdown("##### 단원별 실습 횟수")
-            unit_counts = {unit: 0 for unit in NCS_UNITS}
-            for rec in my_records:
-                unit = rec.get("unit") or ""
-                if unit in unit_counts:
-                    unit_counts[unit] += 1
-            for unit in NCS_UNITS:
-                count = unit_counts[unit]
-                st.markdown(f"✅ **{unit}** — {count}회")
-            st.caption(f"총 누적 실습: {len(my_records)}회")
-        with col_right:
-            st.markdown("##### 개인 성취도 레이더")
-            labels, values = compute_class_average_unit_scores(my_records)
-            if not labels:
-                st.caption("유효한 평가 결과가 누적되면 레이더 차트가 표시됩니다.")
-            elif go is None:
-                st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
-            else:
-                labels_closed = labels + [labels[0]]
-                values_closed = values + [values[0]]
-                fig = go.Figure(
-                    data=[
-                        go.Scatterpolar(
-                            r=values_closed,
-                            theta=labels_closed,
-                            fill="toself",
-                            name="개인 성취율(%)",
-                        )
-                    ]
-                )
-                fig.update_layout(
-                    polar={"radialaxis": {"visible": True, "range": [0, 100]}},
-                    showlegend=False,
-                    margin={"l": 30, "r": 30, "t": 40, "b": 30},
-                    title="나의 NCS 능력단위 누적 성취율",
-                )
-                st.plotly_chart(fig, use_container_width=True)
+            best_unit = "-"
+            weak_unit = "-"
+
+        # 최근 1건과 직전 평균을 비교해 성장 폭(델타)을 보여준다.
+        recent_score_delta: Optional[float] = None
+        try:
+            sorted_recs = sorted(my_records, key=lambda r: r.get("submitted_at") or "")
+            if len(sorted_recs) >= 2:
+                latest = sorted_recs[-1]
+                prior = sorted_recs[:-1]
+                lg, ev = split_combined_result(latest.get("result") or "")
+                latest_score = calculate_ncs_scores(
+                    ev or latest.get("result") or "",
+                    latest.get("mode") or "학습 모드",
+                    guidance_text=lg,
+                )["overall_rate"]
+                prior_labels, prior_values = compute_class_average_unit_scores(prior)
+                prior_avg = sum(prior_values) / len(prior_values) if prior_values else 0.0
+                recent_score_delta = latest_score - prior_avg
+        except Exception:
+            recent_score_delta = None
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("🎯 누적 실습", f"{total_count}회")
+        m2.metric(
+            "📊 평균 성취율",
+            f"{avg_score:.1f}%",
+            delta=(f"최근 {recent_score_delta:+.1f}%p" if recent_score_delta is not None else None),
+        )
+        m3.metric("🌟 강점 단원", best_unit)
+        m4.metric("🔧 보완 단원", weak_unit)
+
+        # ─── 개인 성취도 레이더 (대시보드 중앙) ───
+        if labels and go is not None:
+            labels_closed = labels + [labels[0]]
+            values_closed = values + [values[0]]
+            fig = go.Figure(
+                data=[
+                    go.Scatterpolar(
+                        r=values_closed,
+                        theta=labels_closed,
+                        fill="toself",
+                        name="개인 성취율(%)",
+                        line={"color": "#22c55e"},
+                        fillcolor="rgba(34,197,94,0.25)",
+                    )
+                ]
+            )
+            fig.update_layout(
+                polar={"radialaxis": {"visible": True, "range": [0, 100]}},
+                showlegend=False,
+                margin={"l": 30, "r": 30, "t": 30, "b": 20},
+                height=320,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        elif go is None:
+            st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
+
+        # ─── 포트폴리오 PDF (보조 기능 — 평소엔 접힘) ───
+        if FPDF is not None:
+            with st.expander("🎓 종합 포트폴리오 PDF 다운로드", expanded=False):
+                try:
+                    portfolio_bytes = build_comprehensive_portfolio_pdf(
+                        student_id=student_id,
+                        student_name=student_name,
+                        records=my_records,
+                    )
+                    st.download_button(
+                        "PDF로 내려받기",
+                        data=portfolio_bytes,
+                        file_name=(
+                            f"comprehensive_portfolio_{student_id or 'student'}_"
+                            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                        ),
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                except Exception as exc:
+                    st.error(f"종합 포트폴리오 PDF 생성 중 오류가 발생했습니다: {exc}")
 
 
 def render_student_mode() -> None:
@@ -1976,8 +2101,31 @@ def render_student_mode() -> None:
             st.markdown(f"- {unit}")
     selected_subject = "자동차 전기전자제어"
     unit_choices = CURRICULUM[selected_subject]
-    selected_unit = st.selectbox("단원 선택", unit_choices, index=0)
-    st.info(f"교과: **{selected_subject}** → 단원: **{selected_unit}**")
+    st.markdown("#### 🎯 오늘 어떤 실습을 할까요?")
+    st.caption("아래에서 단원 카드를 선택하세요. 선택한 단원에 맞춰 입력 예시와 미션이 달라집니다.")
+    unit_labels = [f"{UNIT_ICONS.get(u, '📘')} {u}" for u in unit_choices]
+    picked_label = st.radio(
+        "단원 선택",
+        unit_labels,
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="unit_radio_pick",
+    )
+    selected_unit = unit_choices[unit_labels.index(picked_label)]
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);
+            border:1px solid #93c5fd; border-radius:12px;
+            padding:0.65rem 1rem; margin:0.25rem 0 1rem 0;
+            font-size:0.95rem; color:#1e3a8a;">
+            <b>{UNIT_ICONS.get(selected_unit, '📘')} 선택된 단원:</b>
+            {selected_unit} <span style="color:#475569;">· {selected_subject}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     _render_diagnosis_progress(st.session_state.get("diag_step", "input"))
     tab_input, tab_feedback, tab_ncs = st.tabs(["📝 실습 수행", "🔍 AI 코칭", "📈 성취도 분석"])
     with tab_input:
