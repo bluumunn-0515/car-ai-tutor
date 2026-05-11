@@ -387,8 +387,14 @@ def build_learning_prompt(
 - ❌ 결론·정답 단정 금지(예: "원인은 ~다", "~를 교체하면 됩니다" 등 직접적 답).
 - ❌ **"## 📋 NCS 기반 수행 순서" 섹션에서는 표(Markdown table)를 절대 사용하지 말 것.**
 - ✅ 진단 방향과 측정/점검 절차를 **'미션' 형태**로 제시.
-- ✅ "수행 순서" 섹션은 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 분류하고, 각 단계는 **`• [핵심 행동] **[규정값]**`** 형태의 **단문**(20자 이내, 규정값 제외)으로만 작성.
-- ✅ 규정값(예: 12.6V, 0.2V 이하, 120Ω 등)은 반드시 Markdown **굵게** 표기(`**12.6V**`).
+- ✅ "수행 순서" 섹션은 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 분류한다.
+- ✅ **각 단계는 다음 4줄 구조로 반드시 작성한다** — 학생이 단계 2(실습 수행 결과 제출)에서 그대로 따라 할 수 있게 한다:
+    1) 상위 불릿 = 핵심 행동 타이틀: `• [핵심 행동] **[규정값]**` (20자 이내, 규정값 제외)
+    2) 서브 불릿 #1: `    - 🛠 방법: [측정/관찰/조작 절차, 40자 이내]`
+    3) 서브 불릿 #2: `    - 📚 NCS 준거: [본 단원의 [이 단원의 수행준거 요약]에 적힌 라벨 중 한 개를 정확히 인용]`
+    4) 서브 불릿 #3: `    - 📝 기록 예: "[학생이 단계 2 [실습 수행 결과] 입력란에 그대로 붙여 넣을 한 줄 예시, 따옴표 포함, 40자 이내]"`
+- ✅ 규정값(예: 12.6V, 0.2V 이하, 120Ω 등)은 반드시 Markdown **굵게** 표기(`**12.6V**`). 타이틀과 기록 예 안의 측정값도 굵게.
+- ✅ 한 카테고리(### 소제목)당 단계 수는 **최소 2개, 권장 3~4개**. 너무 적게 쳐내지 말고, 본 단원의 수행준거([이 단원의 수행준거 요약])가 골고루 매핑되도록 단계를 구성한다.
 - ✅ "수행 순서" 외 섹션(권장 측정 도구 등)에서는 표 사용 가능. 다른 섹션도 가능하면 짧은 불릿(•)으로.
 - ✅ 단원 핵심 키워드(예: OCV 12.3~12.9V, 발전기 13.8~14.9V, 전압강하 0.2V, 종단저항 120Ω, 솔레노이드 B/ST/M, 릴레이 30/87/85/86, BCM/IPS/B-CAN, bus-off/time-out 등)를 자연스럽게 포함.
 - ✅ [표준 절차]의 (가) 안전 점검 → (나) 회로도 분석(전원→퓨즈→스위치/릴레이→부하→접지) → (다) 시험등 vs DMM 사용 기준 → (라) 스캐너 절차(DTC→센서데이터→강제구동) 흐름을 미션에 녹인다.
@@ -413,23 +419,47 @@ def build_learning_prompt(
 | (필요 시) 시험등/오실로스코프 | … | … |
 
 ## 📋 NCS 기반 수행 순서 (Mission Steps)
-> ⚠ 이 섹션은 **반드시 아래 4개의 ### 소제목** 으로만 작성한다. **표 사용 금지**. 각 단계는 짧은 불릿(•) 한 줄, **20자 이내(규정값 제외)**.
+> ⚠ 이 섹션은 **반드시 아래 4개의 ### 소제목**으로만 작성한다. **표 사용 금지**. 각 단계는 **상위 불릿(타이틀, 20자 이내) + 들여쓴 서브 불릿 3줄(🛠 방법 / 📚 NCS 준거 / 📝 기록 예)** 구조를 그대로 따른다.
 
 ### 🛡️ 준비 / 안전
 • 점화스위치 OFF 확인
+    - 🛠 방법: 키 OFF · 계기판 소등 확인
+    - 📚 NCS 준거: 안전·전원 차단 확인
+    - 📝 기록 예: "점화 OFF, 계기판 소등 확인 (양호)"
 • 절연장갑 착용
+    - 🛠 방법: 양손 절연장갑 + 보안경 착용
+    - 📚 NCS 준거: 안전·전원 차단 확인
+    - 📝 기록 예: "절연장갑·보안경 착용 완료"
 
 ### 🔍 점검 / 회로도
 • 회로도 퓨즈 위치 식별
+    - 🛠 방법: 정비지침서 회로도에서 30A 퓨즈 위치 확인
+    - 📚 NCS 준거: 회로도/기호 분석
+    - 📝 기록 예: "F12 30A 퓨즈 도통 양호 (회로도 일치)"
 • 커넥터 핀 번호 확인
+    - 🛠 방법: 커넥터 식별도로 측정 포인트 핀 번호 매칭
+    - 📚 NCS 준거: 회로도/기호 분석
+    - 📝 기록 예: "E12 커넥터 3번 핀 = (+) 입력 확인"
 
 ### ⚡ 측정 / 전압
 • OCV 측정 **12.3~12.9V**
+    - 🛠 방법: DC V 레인지, (+)/(-) 단자에 리드 접촉 후 측정
+    - 📚 NCS 준거: 개방회로 전압(OCV) 측정
+    - 📝 기록 예: "OCV **12.45V** 측정 (규정 범위 내, 양호)"
 • 전압강하 측정 **0.2V 이하**
+    - 🛠 방법: 부하 인가 상태에서 B+ 케이블 양단 전압 측정
+    - 📚 NCS 준거: 회로 전압강하 측정
+    - 📝 기록 예: "B+ 전압강하 **0.12V** (규정 0.2V 이하, 양호)"
 
 ### 🛠️ 판정 / 조치
 • SOC 75% 이상 양호
+    - 🛠 방법: OCV→SOC 환산표 또는 배터리 테스터로 SOC 판정
+    - 📚 NCS 준거: 부하/CCA·SOC 판정
+    - 📝 기록 예: "SOC **82%** (양호) — 충전 추가 불필요"
 • 규정 외 시 단품 점검
+    - 🛠 방법: CCA 부하시험으로 단품 노후/방전 여부 추가 확인
+    - 📚 NCS 준거: 부하/CCA·SOC 판정
+    - 📝 기록 예: "CCA 측정값 vs 규격 비교 → 단품 교체 권고 검토"
 
 ## ⚠ 안전 주의
 • …
@@ -445,7 +475,10 @@ def build_learning_prompt(
 [중요]
 - 위 7개 H2 섹션 헤더(##)를 정확히 그대로 사용한다.
 - "수행 순서" 섹션 안의 4개 H3 소제목(🛡️ 준비 / 안전, 🔍 점검 / 회로도, ⚡ 측정 / 전압, 🛠️ 판정 / 조치)을 정확히 그대로 사용한다. 표 금지.
-- 각 단계 불릿은 단문(20자 이내) + 규정값은 **굵게**.
+- **각 단계는 위 예시처럼 반드시 4줄(타이틀 + 🛠 방법 + 📚 NCS 준거 + 📝 기록 예) 구조로 작성**한다. 한 줄도 빠뜨리지 않는다.
+- 📚 NCS 준거 값은 [이 단원의 수행준거 요약]에 명시된 라벨에서 골라 정확히 인용한다.
+- 📝 기록 예는 "" 따옴표로 감싸 학생이 그대로 복사·붙여넣을 수 있는 형태로 작성한다(40자 이내).
+- 규정값/측정값은 반드시 **굵게**.
 """.strip()
 def build_evaluation_prompt(
     user_symptom: str,
@@ -496,7 +529,11 @@ def build_evaluation_prompt(
 - ❌ '합격/불합격' 표현 금지.
 - ❌ 정답을 단정하여 노출하지 말 것(필요 시 "권장 진단 방향" 정도로 표현).
 - ❌ **"## ✅ 가이드 대비 수행 충실도" 섹션에서는 표(Markdown table)를 절대 사용하지 말 것.**
-- ✅ "가이드 대비 수행 충실도"는 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 구분하고, 각 단계는 `• [핵심 행동] — [별점] — [짧은 코멘트]` 형태의 단문(코멘트 25자 이내)으로 작성. 별점은 ★★★ / ★★☆ / ★☆☆ / ☆☆☆.
+- ✅ "가이드 대비 수행 충실도"는 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 구분하고, **각 단계는 상위 불릿 1줄 + 들여쓴 서브 불릿 2줄(💬 코멘트 / 🛠 보완)** 구조로 작성한다:
+    1) 상위 불릿: `• [핵심 행동] **[측정값]** — [별점]` (별점 ★★★/★★☆/★☆☆/☆☆☆)
+    2) 서브 불릿 #1: `    - 💬 코멘트: [학생 수행에서 확인된 점, 35자 이내]`
+    3) 서브 불릿 #2: `    - 🛠 보완: [다음 실습에서 보완할 점, 35자 이내 또는 '-']`
+- ✅ [단계 1 AI 가이드(미션)]에 포함된 각 단계에 대해 1:1로 평가한다(가이드의 단계를 모두 짚을 것).
 - ✅ 규정값(예: 12.6V, 0.2V 이하, 120Ω 등)은 반드시 Markdown **굵게** 표기.
 - ✅ "NCS 기준 4축 분석" 등 다른 섹션은 표(Table) 사용 가능.
 - ✅ 표준 절차 (가)안전 점검 / (나)회로도 분석 / (다)시험등 vs DMM / (라)스캐너 절차(DTC→센서데이터→강제구동) 네 측면에서 강·약점을 짚는다.
@@ -509,23 +546,40 @@ def build_evaluation_prompt(
 • (이번 실습 수행을 한 줄로 평가)
 
 ## ✅ 가이드 대비 수행 충실도
-> ⚠ 표 금지. 아래 4개 ### 소제목으로만 작성한다. 각 줄: `• [핵심 행동] — [별점] — [짧은 코멘트]`
+> ⚠ 표 금지. 아래 4개 ### 소제목으로만 작성한다. 각 단계는 **상위 불릿 1줄 + 들여쓴 서브 불릿 2줄(💬 코멘트 / 🛠 보완)** 구조.
+> 상위 불릿 형식: `• [핵심 행동] **[측정값]** — [별점]` (별점은 ★★★ / ★★☆ / ★☆☆ / ☆☆☆ 중 하나)
 
 ### 🛡️ 준비 / 안전
-• 점화 OFF 확인 — ★★☆ — 절차 일부 확인됨
-• 절연장갑 착용 — ☆☆☆ — 언급 누락
+• 점화 OFF 확인 — ★★☆
+    - 💬 코멘트: 점화 OFF 언급은 있으나 계기판 소등 확인 누락
+    - 🛠 보완: 다음 실습에서 계기판 소등 시점까지 함께 기록할 것
+• 절연장갑 착용 — ☆☆☆
+    - 💬 코멘트: 보호구 착용 관련 기록이 전혀 없음
+    - 🛠 보완: 안전 점검 단계 첫 줄에 보호구 착용 여부를 명시
 
 ### 🔍 점검 / 회로도
-• 회로도 분석 — ★★★ — 전원→접지 흐름 명확
-• 커넥터 핀 식별 — ★☆☆ — 핀 번호 누락
+• 회로도 분석 — ★★★
+    - 💬 코멘트: 전원→퓨즈→스위치→부하→접지 흐름이 정확히 기술됨
+    - 🛠 보완: 다음 단계에서 커넥터 핀 번호까지 함께 인용하면 더 좋음
+• 커넥터 핀 식별 — ★☆☆
+    - 💬 코멘트: 커넥터 위치는 언급되었으나 핀 번호 매칭 부족
+    - 🛠 보완: 식별도 기준 핀 번호(예: E12-3번)를 명시할 것
 
 ### ⚡ 측정 / 전압
-• OCV 측정 **12.45V** — ★★★ — 규정 범위 내
-• 전압강하 측정 — ☆☆☆ — 미수행
+• OCV 측정 **12.45V** — ★★★
+    - 💬 코멘트: DC V 레인지 사용·규정 범위 비교 모두 충실
+    - 🛠 보완: -
+• 전압강하 측정 — ☆☆☆
+    - 💬 코멘트: B+ 케이블 전압강하 측정이 수행 결과에 없음
+    - 🛠 보완: 부하 인가 상태에서 **0.2V 이하** 여부 추가 측정 권장
 
 ### 🛠️ 판정 / 조치
-• SOC 양호 판정 — ★★☆ — 근거 보완 필요
-• 단품 점검 제안 — ★★★ — 후속 계획 명확
+• SOC 양호 판정 — ★★☆
+    - 💬 코멘트: SOC 수치는 적혔으나 환산 근거(OCV→SOC) 설명 부족
+    - 🛠 보완: 환산표 또는 테스터 화면 캡처와 함께 근거를 남길 것
+• 단품 점검 제안 — ★★★
+    - 💬 코멘트: 다음 점검 동선(CCA 부하시험) 제안이 구체적
+    - 🛠 보완: -
 
 ## 🔍 NCS 기준 4축 분석
 | 분석 축 | 학생 수행에서 확인된 점 | 보완 필요 |
@@ -545,6 +599,7 @@ def build_evaluation_prompt(
 [중요]
 - 위 4개 H2 섹션 헤더(##)를 정확히 그대로 사용한다.
 - "가이드 대비 수행 충실도" 섹션 안의 4개 H3 소제목(🛡️ 준비 / 안전, 🔍 점검 / 회로도, ⚡ 측정 / 전압, 🛠️ 판정 / 조치)을 정확히 그대로 사용한다. 표 금지.
+- 각 단계는 위 예시처럼 반드시 3줄(타이틀 + 💬 코멘트 + 🛠 보완) 구조로 작성한다. 한 줄도 빠뜨리지 않는다.
 - 규정값은 **굵게**(Markdown bold) 표기.
 """.strip()
 
@@ -793,6 +848,7 @@ def _split_by_heading(text: str, regex: re.Pattern) -> list[tuple[str, str]]:
 
 
 def _extract_bullets(body: str) -> list[str]:
+    """기존 flat 불릿 추출 — 다른 H2 섹션(안전 주의·학습 힌트 등) 호환용으로 남겨둔다."""
     bullets: list[str] = []
     for line in body.splitlines():
         m = _BULLET_RE.match(line)
@@ -801,6 +857,71 @@ def _extract_bullets(body: str) -> list[str]:
             if content:
                 bullets.append(content)
     return bullets
+
+
+# 상위 불릿(공백 0~1칸 시작) vs 서브 불릿(공백 2칸 이상 시작) 구분
+_TOP_BULLET_RE = re.compile(r"^\s{0,1}[•\-\*]\s+(.*)$")
+_SUB_BULLET_RE = re.compile(r"^\s{2,}[-•\*]\s+(.*)$")
+
+
+def _extract_step_blocks(body: str) -> list[dict]:
+    """수행 순서 / 충실도 섹션을 '상위 불릿 = 단계 타이틀' + '들여쓴 서브 불릿 = 단계 내용'으로 파싱.
+
+    Returns: list of dicts {"title": str, "body_md": str (raw sub-bullet markdown lines), "sub": list[str]}
+    """
+    items: list[dict] = []
+    current: Optional[dict] = None
+    for raw in body.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            if current is not None:
+                current["body_lines"].append("")
+            continue
+        top_m = _TOP_BULLET_RE.match(line)
+        sub_m = _SUB_BULLET_RE.match(line)
+        if top_m and not sub_m:
+            current = {"title": top_m.group(1).strip(), "body_lines": [], "sub": []}
+            items.append(current)
+        elif current is not None:
+            if sub_m:
+                current["sub"].append(sub_m.group(1).strip())
+            # 들여쓰기 정도와 무관하게 raw line은 body_md 원문에 보존(재현용)
+            current["body_lines"].append(line.lstrip())
+    return [
+        {
+            "title": it["title"],
+            "body_md": "\n".join(f"- {s}" for s in it["sub"]).strip(),
+            "sub": it["sub"],
+        }
+        for it in items
+    ]
+
+
+def _classify_sub_bullet(sub: str) -> tuple[str, str]:
+    """서브 불릿 한 줄을 (kind, value) 로 분류.
+
+    kind in {"method", "ncs", "record", "comment", "fix", "other"}
+    """
+    text = sub.strip()
+    # 선두의 이모지/장식 문자를 제거하고 'key: value' 패턴을 검사한다.
+    # 키워드 매칭은 한국어 라벨 기준으로 한다 (방법/NCS 준거/기록 예/코멘트/보완).
+    head_strip = re.sub(r"^[\s🛠📚📝💬✅⚠⚡🔍🛡️🪛🧭🚀]+", "", text)
+    m = re.match(r"^(?P<key>[^:：]{1,30})\s*[:：]\s*(?P<val>.*)$", head_strip)
+    if not m:
+        return ("other", text)
+    key_raw = m.group("key").strip().lower()
+    val = m.group("val").strip()
+    if "방법" in key_raw or "how" in key_raw:
+        return ("method", val)
+    if "ncs" in key_raw or "준거" in key_raw:
+        return ("ncs", val)
+    if "기록" in key_raw or "예" == key_raw or "예시" in key_raw or "record" in key_raw:
+        return ("record", val)
+    if "코멘트" in key_raw or "평가" in key_raw or "comment" in key_raw:
+        return ("comment", val)
+    if "보완" in key_raw or "개선" in key_raw or "tip" in key_raw or "fix" in key_raw:
+        return ("fix", val)
+    return ("other", text)
 
 
 def _classify_step_category(header: str) -> Optional[str]:
@@ -849,7 +970,8 @@ def _parse_structured_markdown(text: str, steps_h2_keyword: str) -> dict:
                 cat = _classify_step_category(sub_header)
                 if cat is None:
                     continue
-                result["steps_groups"][cat].extend(_extract_bullets(sub_body))
+                # 새 포맷: 상위 불릿 + 서브 불릿 블록을 함께 캡처
+                result["steps_groups"][cat].extend(_extract_step_blocks(sub_body))
             break
     result["has_new_format"] = any(result["steps_groups"].values())
     return result
@@ -882,41 +1004,138 @@ def _render_regulation_badges(values: list[str]) -> None:
     )
 
 
-def _render_step_cards(steps: list[str], icon: str, empty_msg: str = "") -> None:
-    """진행형 Expander 카드 — 첫 단계만 펼쳐두고, 학생이 다음 단계를 펼쳐 보도록 유도한다."""
+def _render_ncs_badge(ncs_label: str) -> None:
+    """NCS 수행준거 라벨을 보라색 배지로 렌더링한다."""
+    if not ncs_label:
+        return
+    st.markdown(
+        f'<div style="margin:0.2rem 0 0.6rem 0;">'
+        f'<span style="background:#ede9fe;border:1px solid #8b5cf6;color:#5b21b6;'
+        f'padding:0.3rem 0.8rem;border-radius:10px;font-weight:700;font-size:1.0rem;'
+        f'display:inline-block;">📚 NCS 수행준거 · {ncs_label}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> None:
+    """[단계 1 미션] 진행형 Expander 카드.
+
+    각 카드는 학생이 단계 2(실습 수행 결과 제출)를 작성하는 데 직접 도움이 되도록 다음 정보를 포함한다.
+      - 🛠 측정/관찰 방법 (어떻게 수행하는가)
+      - 📚 NCS 수행준거 (이 단계가 매핑되는 능력단위 요소 — 보라색 배지)
+      - 📐 규정값/기준 (타이틀의 굵게 표시 값 — 노란 배지)
+      - 📝 기록 예 (단계 2에 그대로 붙여 넣을 한 줄 — st.code 로 복사 가능)
+    """
     if not steps:
         if empty_msg:
             st.caption(empty_msg)
         return
-    for idx, step in enumerate(steps):
-        bold_values = _BOLD_RE.findall(step)
-        title_clean = _strip_bold(step)
-        is_first = idx == 0
-        with st.expander(f"{icon} 단계 {idx + 1} · {title_clean}", expanded=is_first):
+    for idx, item in enumerate(steps):
+        # 새 포맷(dict) / 옛 포맷(str) 모두 호환
+        if isinstance(item, str):
+            title_raw, sub_lines = item, []
+        else:
+            title_raw = item.get("title", "")
+            sub_lines = item.get("sub", []) or []
+
+        bold_values = _BOLD_RE.findall(title_raw)
+        title_clean = _strip_bold(title_raw)
+
+        method = ncs = record = ""
+        other_md_lines: list[str] = []
+        for sub in sub_lines:
+            kind, value = _classify_sub_bullet(sub)
+            if kind == "method":
+                method = value
+            elif kind == "ncs":
+                ncs = value
+            elif kind == "record":
+                record = value
+            else:
+                other_md_lines.append(f"- {value}")
+
+        with st.expander(f"{icon} 단계 {idx + 1} · {title_clean}", expanded=(idx == 0)):
             _render_regulation_badges(bold_values)
-            st.caption("✅ 이 단계를 수행했다면, 아래 다음 단계 카드를 펼쳐 이동하세요.")
+            _render_ncs_badge(ncs)
+
+            if method:
+                st.markdown(f"**🛠 측정 / 관찰 방법**")
+                st.markdown(f"> {method}")
+            if other_md_lines:
+                st.markdown("\n".join(other_md_lines))
+
+            if record:
+                st.markdown("**📝 단계 2 기록 가이드** — 아래 줄을 복사해 [실습 수행 결과] 입력란에 붙여 넣으세요:")
+                # 따옴표 제거(시각상 깔끔하게)하되 측정값 굵게는 마크다운이 안 먹는 st.code 에 맞춰
+                # 그대로 두는 게 학생에게는 더 직관적이다.
+                copy_text = record.strip().strip('"').strip("'")
+                st.code(copy_text, language="text")
+
+            # 가이드가 비정상적으로 짧을 때(서브 불릿이 비어 있을 때)도 빈 카드는 피한다.
+            if not (method or ncs or record or other_md_lines or bold_values):
+                st.caption("이 단계의 상세 가이드가 비어 있어요. 다음 단계 카드를 펼쳐 진행하세요.")
+
+            st.markdown(
+                '<div style="background:#f0fdf4;border-left:4px solid #22c55e;'
+                'padding:0.5rem 0.8rem;margin-top:0.6rem;border-radius:6px;font-size:0.95rem;">'
+                '✅ 이 단계를 수행했다면 다음 카드를 펼쳐 이동하세요.</div>',
+                unsafe_allow_html=True,
+            )
 
 
-def _render_eval_step_cards(steps: list[str], icon: str, empty_msg: str = "") -> None:
-    """평가 카드용: `행동 — ★★☆ — 코멘트` 형태 줄을 별점/코멘트와 함께 카드로 보여준다."""
+def _render_eval_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> None:
+    """[단계 2 평가] 진행형 Expander 카드.
+
+    상위 불릿 `행동 — ★★☆` + 서브 불릿(💬 코멘트 / 🛠 보완) 구조를 렌더링한다.
+    """
     if not steps:
         if empty_msg:
             st.caption(empty_msg)
         return
-    for idx, raw in enumerate(steps):
-        parts = [p.strip() for p in raw.split("—")]
-        action = parts[0] if parts else raw
+    for idx, item in enumerate(steps):
+        if isinstance(item, str):
+            title_raw, sub_lines = item, []
+        else:
+            title_raw = item.get("title", "")
+            sub_lines = item.get("sub", []) or []
+
+        # 타이틀의 ' — ★★☆ ' 형식 분해
+        parts = [p.strip() for p in title_raw.split("—")]
+        action = parts[0] if parts else title_raw
         stars = parts[1] if len(parts) >= 2 else ""
-        comment = " — ".join(parts[2:]) if len(parts) >= 3 else ""
+        title_tail_comment = " — ".join(parts[2:]) if len(parts) >= 3 else ""
+
         bold_values = _BOLD_RE.findall(action)
         action_clean = _strip_bold(action)
-        title = f"{icon} {action_clean}"
+
+        comment = fix = ""
+        other_md_lines: list[str] = []
+        for sub in sub_lines:
+            kind, value = _classify_sub_bullet(sub)
+            if kind == "comment":
+                comment = value
+            elif kind == "fix":
+                fix = value
+            else:
+                other_md_lines.append(f"- {value}")
+
+        header = f"{icon} {action_clean}"
         if stars:
-            title += f"  ·  {stars}"
-        with st.expander(title, expanded=(idx == 0)):
-            if comment:
-                st.markdown(f"💬 {comment}")
+            header += f"  ·  {stars}"
+        with st.expander(header, expanded=(idx == 0)):
             _render_regulation_badges(bold_values)
+            if title_tail_comment:
+                st.markdown(f"💬 {title_tail_comment}")
+            if comment:
+                st.markdown("**💬 평가 코멘트**")
+                st.markdown(f"> {comment}")
+            if fix and fix != "-":
+                st.markdown("**🛠 다음 실습 보완 포인트**")
+                st.markdown(f"> {fix}")
+            if other_md_lines:
+                st.markdown("\n".join(other_md_lines))
+            if not (comment or fix or other_md_lines or bold_values or title_tail_comment):
+                st.caption("이 단계의 상세 평가가 비어 있어요.")
 
 
 def render_mission_card(guidance_text: str) -> None:
@@ -2068,21 +2287,33 @@ def _render_diagnosis_input_tab(
         render_mission_card(st.session_state.get("latest_guidance", ""))
         st.markdown("---")
         st.markdown("#### 🧪 실습 수행 결과 입력")
-        st.caption(
-            "위 미션의 각 단계를 실제로 수행한 결과(측정값·관찰·판단)를 적어 주세요. "
-            "AI는 이 결과를 가이드와 비교해 충실도(★★★)와 NCS 수행준거 정렬을 평가합니다."
+        st.markdown(
+            '<div style="background:#fffbeb;border-left:5px solid #f59e0b;'
+            'padding:0.7rem 1rem;border-radius:8px;margin-bottom:0.6rem;font-size:1.02rem;">'
+            '💡 <b>작성 팁</b> — 위 미션 카드의 <b>📝 단계 2 기록 가이드</b> 줄을 그대로 복사해 '
+            '4개 카테고리(🛡️ 준비·안전 / 🔍 점검·회로도 / ⚡ 측정·전압 / 🛠️ 판정·조치)별로 정리하면 '
+            'AI 평가에서 충실도(★★★)가 잘 매칭됩니다.</div>',
+            unsafe_allow_html=True,
         )
         execution_result = st.text_area(
             "실습 수행 결과",
             placeholder=(
-                "예시)\n"
-                "• 안전 점검: 점화스위치 OFF, 절연장갑 착용 후 단자 보호 확인\n"
-                "• OCV 측정값: 12.45V (규정 12.3~12.9V 범위 내, 양호)\n"
-                "• 암전류 측정: 32mA (50mA 미만, 양호)\n"
-                "• 최종 판단: 배터리 자체는 정상, 시동 불량 원인은 솔레노이드 ST단자 전압강하로 추정"
+                "### 🛡️ 준비 / 안전\n"
+                "- 점화 OFF, 계기판 소등 확인 (양호)\n"
+                "- 절연장갑·보안경 착용 완료\n\n"
+                "### 🔍 점검 / 회로도\n"
+                "- F12 30A 퓨즈 도통 양호 (회로도 일치)\n"
+                "- E12 커넥터 3번 핀 = (+) 입력 확인\n\n"
+                "### ⚡ 측정 / 전압\n"
+                "- OCV 12.45V 측정 (규정 12.3~12.9V 범위 내, 양호)\n"
+                "- B+ 전압강하 0.12V (규정 0.2V 이하, 양호)\n\n"
+                "### 🛠️ 판정 / 조치\n"
+                "- SOC 82% 양호 — 충전 추가 불필요\n"
+                "- 시동 불량은 솔레노이드 ST단자 전압강하 의심 → 추가 점검 권고"
             ),
-            height=240,
+            height=320,
             key="diag_execution_result",
+            help="미션 카드의 '📝 기록 가이드' 줄을 복사해 4개 카테고리 아래에 붙여 넣고, 실제 측정값으로 숫자를 교체하세요.",
         )
         col_back, col_submit = st.columns([1, 2])
         with col_back:
