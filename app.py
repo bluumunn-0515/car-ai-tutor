@@ -541,6 +541,7 @@ def build_evaluation_prompt(
 - ❌ '합격/불합격' 표현 금지.
 - ❌ 정답을 단정하여 노출하지 말 것(필요 시 "권장 진단 방향" 정도로 표현).
 - ❌ **"## ✅ 가이드 대비 수행 충실도" 섹션에서는 표(Markdown table)를 절대 사용하지 말 것.**
+- ✅ **"## 🏷 카테고리 요약" 섹션은 반드시 4줄(4개 카테고리 각 1줄)로 작성한다.** 각 줄은 `• [카테고리] — [✅ 통과 | ⚠ 보완] | [코멘트 25자 이내]` 형식으로, 학생이 한눈에 '무엇을 잘했고 무엇을 놓쳤는지' 알 수 있게 한다.
 - ✅ "가이드 대비 수행 충실도"는 4개의 ### 소제목(🛡️/🔍/⚡/🛠️)으로 구분하고, **각 단계는 상위 불릿 1줄 + 들여쓴 서브 불릿 2줄(💬 코멘트 / 🛠 보완)** 구조로 작성한다:
     1) 상위 불릿: `• [핵심 행동] **[측정값]** — [별점]` (별점 ★★★/★★☆/★☆☆/☆☆☆)
     2) 서브 불릿 #1: `    - 💬 코멘트: [학생 수행에서 확인된 점, 35자 이내]`
@@ -555,7 +556,16 @@ def build_evaluation_prompt(
 [출력 형식 — 아래 마크다운 구조를 그대로 따른다]
 
 ## 📋 평가 한줄 요약
-• (이번 실습 수행을 한 줄로 평가)
+• (이번 실습 수행을 한 줄로 평가, 35자 이내)
+
+## 🏷 카테고리 요약
+> ⚠ 반드시 아래 4줄(4개 카테고리 각 1줄)만 작성한다. 각 줄 형식: `• [카테고리 이름] — [✅ 통과 | ⚠ 보완] | [한줄 코멘트, 25자 이내]`
+> 통과 기준: 학생 수행이 가이드와 NCS 수행준거에 큰 누락 없이 부합. 보완: 누락·근거 부족·규정값 미인용 중 하나라도 해당.
+
+• 🛡️ 준비 / 안전 — ✅ 통과 | 점화 OFF·보호구 모두 확인
+• 🔍 점검 / 회로도 — ⚠ 보완 | 커넥터 핀 번호 누락
+• ⚡ 측정 / 전압 — ✅ 통과 | OCV **12.45V** 규정 범위 내
+• 🛠️ 판정 / 조치 — ⚠ 보완 | SOC 환산 근거 부족
 
 ## ✅ 가이드 대비 수행 충실도
 > ⚠ 표 금지. 아래 4개 ### 소제목으로만 작성한다. 각 단계는 **상위 불릿 1줄 + 들여쓴 서브 불릿 2줄(💬 코멘트 / 🛠 보완)** 구조.
@@ -609,7 +619,8 @@ def build_evaluation_prompt(
 • [학습 질문]에 대한 후속 실습 동선 제안
 
 [중요]
-- 위 4개 H2 섹션 헤더(##)를 정확히 그대로 사용한다.
+- 위 5개 H2 섹션 헤더(##)를 정확히 그대로 사용한다(평가 한줄 요약, 🏷 카테고리 요약, ✅ 가이드 대비 수행 충실도, 🔍 NCS 기준 4축 분석, 🛠 보완이 필요한 능력 단위 요소, 🚀 다음 학습 미션).
+- "🏷 카테고리 요약" 섹션은 정확히 4줄 — 🛡️ 준비 / 안전, 🔍 점검 / 회로도, ⚡ 측정 / 전압, 🛠️ 판정 / 조치 — 각 1줄씩 작성한다. 상태는 ✅ 통과 또는 ⚠ 보완 중 하나.
 - "가이드 대비 수행 충실도" 섹션 안의 4개 H3 소제목(🛡️ 준비 / 안전, 🔍 점검 / 회로도, ⚡ 측정 / 전압, 🛠️ 판정 / 조치)을 정확히 그대로 사용한다. 표 금지.
 - 각 단계는 위 예시처럼 반드시 3줄(타이틀 + 💬 코멘트 + 🛠 보완) 구조로 작성한다. 한 줄도 빠뜨리지 않는다.
 - 규정값은 **굵게**(Markdown bold) 표기.
@@ -943,6 +954,75 @@ def _extract_step_blocks(body: str) -> list[dict]:
         }
         for it in items
     ]
+
+
+_CATEGORY_DEFS = [
+    ("safety", "🛡️", "준비 / 안전", ["준비", "안전", "🛡"]),
+    ("inspect", "🔍", "점검 / 회로도", ["점검", "회로도", "🔍"]),
+    ("measure", "⚡", "측정 / 전압", ["측정", "전압", "⚡"]),
+    ("judge", "🛠️", "판정 / 조치", ["판정", "조치", "🛠"]),
+]
+
+
+def _parse_category_summary(body: str) -> list[dict]:
+    """평가 결과의 '## 🏷 카테고리 요약' 섹션 body 를 4개 카테고리 카드로 파싱.
+
+    각 줄 형식: `• [카테고리] — [✅ 통과 | ⚠ 보완] | [코멘트]`
+    """
+    parsed: dict[str, dict] = {}
+    if not (body or "").strip():
+        return []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith(">"):
+            continue
+        # 불릿 제거
+        m = re.match(r"^[•\-\*]\s*(.+)$", line)
+        if not m:
+            continue
+        content = m.group(1).strip()
+        # `카테고리 — 상태 | 코멘트` 분해 — 'ㅡ', '—', '-' 등 다양한 대시 허용
+        parts = re.split(r"\s*[—–―ㅡ-]\s*", content, maxsplit=1)
+        if len(parts) < 2:
+            continue
+        cat_raw, rest = parts[0].strip(), parts[1].strip()
+        # 상태 | 코멘트 분리
+        if "|" in rest:
+            status_raw, comment = [p.strip() for p in rest.split("|", 1)]
+        else:
+            status_raw, comment = rest, ""
+
+        # 카테고리 식별
+        cat_l = cat_raw.replace("*", "")
+        key = ""
+        icon = "📌"
+        label = cat_raw
+        for k, ic, lab, kws in _CATEGORY_DEFS:
+            if any(kw in cat_l for kw in kws):
+                key, icon, label = k, ic, lab
+                break
+        if not key:
+            continue
+
+        # 상태 판정 — ✅/통과/PASS vs ⚠/보완/FIX
+        s_low = status_raw.lower()
+        if "✅" in status_raw or "통과" in status_raw or "pass" in s_low or "ok" in s_low:
+            status = "pass"
+        elif "⚠" in status_raw or "보완" in status_raw or "fix" in s_low:
+            status = "fix"
+        else:
+            status = "other"
+
+        # 같은 카테고리가 중복 등장 시 가장 마지막 줄을 사용
+        parsed[key] = {
+            "key": key,
+            "icon": icon,
+            "label": label,
+            "status": status,
+            "comment": comment,
+        }
+    # 정의된 4개 카테고리 순서로 정렬해 반환
+    return [parsed[k] for k, *_ in _CATEGORY_DEFS if k in parsed]
 
 
 def _classify_sub_bullet(sub: str) -> tuple[str, str]:
@@ -1279,8 +1359,58 @@ def render_mission_card(guidance_text: str) -> None:
                 st.markdown(photo)
 
 
+def _render_category_card(item: dict) -> None:
+    """카테고리 요약 한 칸 — ✅통과 / ⚠보완 + 1줄 코멘트."""
+    if item["status"] == "pass":
+        bg = "linear-gradient(135deg,#dcfce7 0%,#86efac 100%)"
+        border = "#16a34a"
+        title_color = "#14532d"
+        badge_bg = "#16a34a"
+        badge_text = "#ffffff"
+        badge_label = "✅ 통과"
+    elif item["status"] == "fix":
+        bg = "linear-gradient(135deg,#fee2e2 0%,#fca5a5 100%)"
+        border = "#ef4444"
+        title_color = "#7f1d1d"
+        badge_bg = "#ef4444"
+        badge_text = "#ffffff"
+        badge_label = "⚠ 보완"
+    else:
+        bg = "linear-gradient(135deg,#f1f5f9 0%,#cbd5e1 100%)"
+        border = "#64748b"
+        title_color = "#334155"
+        badge_bg = "#64748b"
+        badge_text = "#ffffff"
+        badge_label = "ℹ 확인"
+
+    comment_html = (item.get("comment") or "").strip() or "코멘트 없음"
+    # ** ** (Markdown bold) → <b> 치환으로 카드 안에서도 굵게 보이게
+    comment_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", comment_html)
+
+    html = (
+        f'<div style="background:{bg};border:2px solid {border};border-radius:14px;'
+        f'padding:1rem 1.1rem;min-height:155px;display:flex;flex-direction:column;'
+        f'justify-content:space-between;box-shadow:0 3px 10px rgba(15,23,42,0.08);">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+        f'<span style="font-size:1.05rem;font-weight:800;color:{title_color};">'
+        f'{item["icon"]} {item["label"]}</span>'
+        f'<span style="background:{badge_bg};color:{badge_text};font-weight:800;'
+        f'padding:0.35rem 0.85rem;border-radius:14px;font-size:0.95rem;letter-spacing:0.02em;">'
+        f'{badge_label}</span>'
+        f'</div>'
+        f'<div style="margin-top:0.7rem;font-size:1.02rem;line-height:1.55;color:#0f172a;">'
+        f'{comment_html}</div>'
+        f'</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
 def render_evaluation_card(evaluation_text: str) -> None:
-    """[단계 2] 실습 수행 평가 카드 — 4카테고리 충실도 카드 + 기타 H2 섹션."""
+    """[단계 2] 실습 수행 평가 카드 — 4개 카테고리 시각 카드 중심으로 압축.
+
+    텍스트를 대폭 줄이고 ✅통과/⚠보완 + 1줄 코멘트만 빠르게 보이도록 한다.
+    상세 충실도/4축 분석/보완 항목/다음 미션은 보조 expander로 숨긴다.
+    """
     if not evaluation_text or not evaluation_text.strip():
         st.caption("아직 생성된 평가가 없습니다.")
         return
@@ -1290,63 +1420,101 @@ def render_evaluation_card(evaluation_text: str) -> None:
     groups = parsed["steps_groups"]
 
     one_liner = _find_h2_body(h2_sections, "한줄 요약", "평가 한줄")
+    cat_summary_body = _find_h2_body(h2_sections, "카테고리 요약", "🏷")
     axis_analysis = _find_h2_body(h2_sections, "4축 분석", "기준 4축")
     weak_units = _find_h2_body(h2_sections, "보완이 필요한", "보완 필요")
     next_mission = _find_h2_body(h2_sections, "다음 학습 미션", "다음 학습")
 
-    # ─── 결과 배너 ───
+    category_items = _parse_category_summary(cat_summary_body)
+
+    # ─── 결과 배너 + 한줄 요약 ───
     with st.chat_message("assistant", avatar="📝"):
         st.markdown(
             '<div style="background:linear-gradient(135deg,#065f46 0%,#10b981 100%);'
             'color:#ecfdf5;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
             'letter-spacing:0.02em;margin-bottom:0.6rem;font-size:1.12rem;'
             'box-shadow:0 2px 8px rgba(6,95,70,0.25);">'
-            '🏆 미션 수행 평가 — Result Report</div>',
+            '🏆 미션 수행 평가 — 한눈에 보는 결과</div>',
             unsafe_allow_html=True,
         )
-        st.caption("가이드 대비 충실도와 NCS 수행준거 정렬도를 카테고리별로 정리한 평가 카드입니다.")
         if one_liner:
-            with st.container(border=True):
-                st.markdown("#### 📋 평가 한줄 요약")
-                st.markdown(one_liner)
+            one_liner_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", one_liner.strip())
+            st.markdown(
+                f'<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;'
+                f'padding:0.8rem 1rem;color:#064e3b;font-size:1.08rem;line-height:1.55;">'
+                f'📋 <b>한줄 요약</b> — {one_liner_html}</div>',
+                unsafe_allow_html=True,
+            )
 
     # ─── 레거시 폴백 ───
-    if not parsed["has_new_format"]:
+    if not parsed["has_new_format"] and not category_items:
         with st.container(border=True):
             st.markdown("##### 📜 평가 원문 (이전 포맷)")
             st.markdown(evaluation_text)
         return
 
-    # ─── 충실도 4카테고리 카드 ───
-    st.markdown("#### ✅ 가이드 대비 수행 충실도")
-    cat_safety, cat_measure, cat_judge = st.tabs(
-        ["🛡️ 준비 / 안전", "⚡ 측정 미션", "🛠️ 고장 판정"]
-    )
-    with cat_safety:
-        _render_eval_step_cards(groups["safety"], "🛡️", empty_msg="해당 카테고리 평가가 없어요.")
-    with cat_measure:
-        if groups["inspect"]:
-            st.markdown("##### 🔍 점검 / 회로도")
-            _render_eval_step_cards(groups["inspect"], "🔍")
-            st.markdown("")
-        st.markdown("##### ⚡ 측정 / 전압")
-        _render_eval_step_cards(groups["measure"], "⚡", empty_msg="해당 카테고리 평가가 없어요.")
-    with cat_judge:
-        _render_eval_step_cards(groups["judge"], "🛠️", empty_msg="해당 카테고리 평가가 없어요.")
+    # ─── 4 카테고리 시각 카드 (2x2 그리드) ───
+    st.markdown("#### 🏷 카테고리별 평가 — 한눈에 보기")
+    if not category_items:
+        st.caption(
+            "AI 응답에 '🏷 카테고리 요약' 섹션이 포함되지 않았습니다. "
+            "아래 상세 충실도 섹션을 참고해 주세요."
+        )
+    else:
+        # 통과/보완 집계 메트릭 (상단에 큼직하게)
+        pass_count = sum(1 for it in category_items if it["status"] == "pass")
+        fix_count = sum(1 for it in category_items if it["status"] == "fix")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("🎯 평가 카테고리", f"{len(category_items)}개")
+        m2.metric("✅ 통과", f"{pass_count}개")
+        m3.metric("⚠ 보완 필요", f"{fix_count}개", delta=None)
 
-    # ─── 기타 분석 섹션 ───
-    if axis_analysis:
-        with st.container(border=True):
-            st.markdown("#### 🔍 NCS 기준 4축 분석")
-            st.markdown(axis_analysis)
-    if weak_units:
-        with st.container(border=True):
-            st.markdown("#### 🛠 보완이 필요한 능력 단위 요소")
-            st.markdown(weak_units)
-    if next_mission:
-        with st.container(border=True):
-            st.markdown("#### 🚀 다음 학습 미션")
-            st.markdown(next_mission)
+        # 2x2 그리드 카드 배치
+        rows = [category_items[i:i + 2] for i in range(0, len(category_items), 2)]
+        for row in rows:
+            cols = st.columns(len(row))
+            for col, item in zip(cols, row):
+                with col:
+                    _render_category_card(item)
+            st.markdown("")  # 행 사이 간격
+
+    # ─── 상세 정보는 expander 로 숨김 ───
+    has_detail = bool(
+        groups["safety"] or groups["inspect"] or groups["measure"] or groups["judge"]
+        or axis_analysis or weak_units or next_mission
+    )
+    if not has_detail:
+        return
+
+    with st.expander("🔍 상세 평가 — 단계별 충실도 / 4축 분석 / 다음 미션", expanded=False):
+        if any(groups.values()):
+            st.markdown("##### ✅ 가이드 대비 수행 충실도")
+            cat_safety, cat_measure, cat_judge = st.tabs(
+                ["🛡️ 준비 / 안전", "⚡ 측정 미션", "🛠️ 고장 판정"]
+            )
+            with cat_safety:
+                _render_eval_step_cards(groups["safety"], "🛡️", empty_msg="해당 카테고리 평가가 없어요.")
+            with cat_measure:
+                if groups["inspect"]:
+                    st.markdown("**🔍 점검 / 회로도**")
+                    _render_eval_step_cards(groups["inspect"], "🔍")
+                    st.markdown("")
+                st.markdown("**⚡ 측정 / 전압**")
+                _render_eval_step_cards(groups["measure"], "⚡", empty_msg="해당 카테고리 평가가 없어요.")
+            with cat_judge:
+                _render_eval_step_cards(groups["judge"], "🛠️", empty_msg="해당 카테고리 평가가 없어요.")
+        if axis_analysis:
+            with st.container(border=True):
+                st.markdown("**🔍 NCS 기준 4축 분석**")
+                st.markdown(axis_analysis)
+        if weak_units:
+            with st.container(border=True):
+                st.markdown("**🛠 보완이 필요한 능력 단위 요소**")
+                st.markdown(weak_units)
+        if next_mission:
+            with st.container(border=True):
+                st.markdown("**🚀 다음 학습 미션**")
+                st.markdown(next_mission)
 
 
 def render_feedback_cards(result_text: str, mode: str) -> None:
@@ -1686,88 +1854,195 @@ def build_comprehensive_portfolio_pdf(
     return bytes(pdf.output(dest="S"))
 
 
-def render_ncs_achievement(result_text: str, mode: str, guidance_text: str = "") -> None:
-    st.markdown("#### NCS 능력단위 성취도 체크")
-    if not result_text:
+def _criterion_icon(idx: int, label: str) -> str:
+    """단원 내 수행준거 라벨에 어울리는 직관적인 이모지를 자동 매핑한다."""
+    L = label
+    if any(k in L for k in ("안전", "전원", "차단", "보호")):
+        return "🛡️"
+    if any(k in L for k in ("회로도", "기호", "분석")):
+        return "📐"
+    if any(k in L for k in ("측정", "OCV", "전압", "강하", "파형", "신호")):
+        return "⚡"
+    if any(k in L for k in ("판정", "교체", "조치", "SOC", "CCA", "교환")):
+        return "🛠️"
+    if any(k in L for k in ("외관", "확인", "예비")):
+        return "🔍"
+    if any(k in L for k in ("스캐너", "DTC", "강제구동", "진단장비")):
+        return "📡"
+    if any(k in L for k in ("통신", "CAN", "LIN", "게이트웨이", "종단", "프로토콜")):
+        return "📶"
+    if "암전류" in L:
+        return "🔋"
+    return ["1️⃣", "2️⃣", "3️⃣", "4️⃣"][idx % 4]
+
+
+def calculate_single_unit_criteria(
+    unit_name: str,
+    result_text: str,
+    guidance_text: str = "",
+    mode: str = "학습 모드",
+) -> list[dict]:
+    """단일 단원의 4개 수행준거별 달성률(0~1)과 매칭 키워드를 계산한다.
+
+    - 가이드(미션)에 키워드가 있고 학생 결과에도 있으면 100% (가이드 이행)
+    - 가이드에는 있으나 학생 결과 누락이면 0% (보완 필요)
+    - 가이드 외 학생이 자율 언급이면 70% (자율 수행 인정)
+    - 둘 다 없으면 0%
+    """
+    criteria = NCS_RUBRIC.get(unit_name, [])
+    weights = MODE_RUBRIC_WEIGHTS.get(mode, {})
+    has_guidance = bool(guidance_text and guidance_text.strip())
+    result_lower = (result_text or "").lower()
+    guidance_lower = (guidance_text or "").lower()
+
+    rows: list[dict] = []
+    for label, keywords in criteria:
+        weight = weights.get(label, 1.0)
+        matched_in_result = [kw for kw in keywords if kw.lower() in result_lower]
+        matched_in_guidance = [kw for kw in keywords if kw.lower() in guidance_lower]
+        if has_guidance:
+            in_g = bool(matched_in_guidance)
+            in_r = bool(matched_in_result)
+            if in_g and in_r:
+                completion, status = 1.0, "good"
+            elif in_g and not in_r:
+                completion, status = 0.0, "guide-missed"
+            elif in_r:
+                completion, status = 0.7, "self"
+            else:
+                completion, status = 0.0, "absent"
+        else:
+            in_r = bool(matched_in_result)
+            completion = 1.0 if in_r else 0.0
+            status = "good" if in_r else "absent"
+        rows.append(
+            {
+                "label": label,
+                "completion": completion,
+                "weight": weight,
+                "matched_keywords": matched_in_result[:3],
+                "example_keywords": keywords[:4],
+                "status": status,
+            }
+        )
+    return rows
+
+
+def _render_criterion_progress(idx: int, row: dict) -> None:
+    """단일 수행준거의 큰 진행 카드 — 아이콘 + 라벨 + 상태 배지 + 굵은 progress bar."""
+    icon = _criterion_icon(idx, row["label"])
+    comp = float(row["completion"])
+    pct = int(round(comp * 100))
+    if comp >= 0.8:
+        badge_bg = "#16a34a"
+        badge_text = "#ffffff"
+        badge_label = "✅ 충족"
+    elif comp >= 0.4:
+        badge_bg = "#f59e0b"
+        badge_text = "#7c2d12"
+        badge_label = "🟡 부분 충족"
+    else:
+        badge_bg = "#ef4444"
+        badge_text = "#ffffff"
+        badge_label = "⚠️ 보완 필요"
+
+    with st.container(border=True):
+        head_html = (
+            '<div style="display:flex;align-items:center;justify-content:space-between;'
+            'margin-bottom:0.4rem;">'
+            f'<span style="font-size:1.18rem;font-weight:800;color:#0f172a;">'
+            f'{icon} 준거 {idx + 1}. {row["label"]}</span>'
+            f'<span style="background:{badge_bg};color:{badge_text};font-weight:800;'
+            f'padding:0.35rem 0.85rem;border-radius:14px;font-size:0.95rem;">{badge_label}</span>'
+            '</div>'
+        )
+        st.markdown(head_html, unsafe_allow_html=True)
+        st.progress(comp, text=f"{pct}% 달성")
+        if row["matched_keywords"]:
+            kws = ", ".join(f"`{k}`" for k in row["matched_keywords"])
+            st.markdown(
+                f'<div style="color:#14532d;font-size:0.98rem;margin-top:0.35rem;">'
+                f'✅ 내 결과에서 확인된 키워드 — {kws}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            examples = ", ".join(f"`{k}`" for k in row["example_keywords"])
+            st.markdown(
+                f'<div style="color:#7f1d1d;font-size:0.98rem;margin-top:0.35rem;">'
+                f'⚠️ 관련 키워드를 찾지 못했어요. 다음 실습에서는 {examples} 같은 표현을 결과에 포함해 보세요.</div>',
+                unsafe_allow_html=True,
+            )
+
+
+def render_ncs_achievement(
+    result_text: str,
+    mode: str,
+    guidance_text: str = "",
+    unit_name: str = "",
+) -> None:
+    """오늘 수행한 단일 단원에 집중한 성취도 화면.
+
+    기존의 '모든 단원 평균 + 레이더 차트' UI 대신, 학생이 방금 끝낸 단원의
+    4가지 세부 수행준거를 개별 progress 카드로 큼직하게 노출한다.
+    """
+    if not result_text or not result_text.strip():
         st.caption("아직 분석할 결과가 없습니다. 먼저 [단계 2] 실습 수행 결과를 제출해 주세요.")
         return
-    score_data = calculate_ncs_scores(result_text, mode, guidance_text=guidance_text)
-    unit_scores = score_data["unit_scores"]
-    if score_data.get("guidance_aware"):
-        st.caption("✅ AI 가이드 충실도 가중치가 반영된 성취도입니다 (가이드 이행=만점, 자율 수행=70%).")
-    radar_labels = []
-    radar_values = []
-    ai_overview = []
-    for unit_data in unit_scores:
-        unit = unit_data["unit"]
-        criteria = NCS_RUBRIC[unit]
-        matched_labels = []
-        missing_labels = unit_data["missing_labels"]
-        evidence_map = {}
-        unit_score = 0
-        completion = unit_data["completion"]
-        lowered = result_text.lower()
-        for label, keywords in criteria:
-            matched_keywords = [keyword for keyword in keywords if keyword.lower() in lowered]
-            if matched_keywords:
-                matched_labels.append(label)
-                evidence_map[label] = [
-                    (keyword, extract_evidence_snippet(result_text, keyword)) for keyword in matched_keywords[:2]
-                ]
-                unit_score += 1
-        if completion >= 0.75:
-            st.success(f"{unit}: {unit_score}/{len(criteria)} (가중 양호)")
-        elif completion >= 0.5:
-            st.warning(f"{unit}: {unit_score}/{len(criteria)} (가중 보통)")
-        else:
-            st.error(f"{unit}: {unit_score}/{len(criteria)} (가중 보완 필요)")
-        st.progress(completion)
-        st.caption(f"달성 항목: {', '.join(matched_labels) if matched_labels else '확인된 항목 없음'}")
-        st.caption(f"보완 항목: {', '.join(missing_labels) if missing_labels else '보완 항목 없음'}")
-        if evidence_map:
-            st.caption("매칭 근거 (키워드 + 원문 스니펫)")
-            for label, evidences in evidence_map.items():
-                for keyword, snippet in evidences:
-                    st.caption(f"- {label} | 키워드: {keyword} | 근거: {snippet}")
-        st.markdown("---")
-        short_name = unit.replace("자동차 ", "").replace(" 점검", "").replace(" 고장진단", "")
-        radar_labels.append(short_name)
-        radar_values.append(round(completion * 100, 1))
-        if missing_labels:
-            ai_overview.append(f"- {short_name}: `{missing_labels[0]}` 중심 보완이 필요합니다.")
-        else:
-            ai_overview.append(f"- {short_name}: 핵심 수행 항목이 전반적으로 잘 반영되었습니다.")
-    weighted_achievement_rate = score_data["overall_rate"]
-    st.metric("모드 반영 NCS 루브릭 성취율", f"{weighted_achievement_rate:.1f}%")
-    st.caption(f"현재 적용 모드: {mode} (모드별 가중치 적용)")
-    st.caption("참고: 업로드 문서 없이 동작하는 기본 체크리스트 기반 분석입니다.")
-    if go is not None and radar_labels:
-        radar_labels_closed = radar_labels + [radar_labels[0]]
-        radar_values_closed = radar_values + [radar_values[0]]
-        fig = go.Figure(
-            data=[
-                go.Scatterpolar(
-                    r=radar_values_closed,
-                    theta=radar_labels_closed,
-                    fill="toself",
-                    name="능력단위 성취율",
-                )
-            ]
-        )
-        fig.update_layout(
-            polar={"radialaxis": {"visible": True, "range": [0, 100]}},
-            showlegend=False,
-            margin={"l": 30, "r": 30, "t": 40, "b": 30},
-            title="NCS 능력단위 성취율 레이더 차트",
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
-    st.markdown("#### AI 총평")
-    for summary in ai_overview:
-        st.markdown(summary)
-    with st.expander("NCS 기반 분석 원문 보기"):
-        st.write(result_text)
+
+    unit_name = (unit_name or st.session_state.get("latest_unit") or "").strip()
+    if not unit_name or unit_name not in NCS_RUBRIC:
+        st.warning("최근 수행한 단원 정보를 찾을 수 없어 분석할 수 없습니다.")
+        return
+
+    icon = UNIT_ICONS.get(unit_name, "📘")
+    rows = calculate_single_unit_criteria(unit_name, result_text, guidance_text, mode)
+    if not rows:
+        st.warning(f"'{unit_name}' 단원의 수행준거 정보가 없어 분석할 수 없습니다.")
+        return
+
+    # 가중 합산 성취율
+    total_weight = sum(r["weight"] for r in rows) or 1.0
+    overall = sum(r["completion"] * r["weight"] for r in rows) / total_weight * 100
+    good_count = sum(1 for r in rows if r["completion"] >= 0.8)
+    fix_count = sum(1 for r in rows if r["completion"] < 0.4)
+
+    # ─── 헤더 ───
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);'
+        f'color:#eff6ff;padding:1.1rem 1.3rem;border-radius:14px;'
+        f'box-shadow:0 4px 14px rgba(30,58,138,0.25);margin-bottom:1rem;">'
+        f'<div style="font-size:1.45rem;font-weight:800;letter-spacing:-0.01em;">'
+        f'{icon} 오늘의 단원 · {unit_name}</div>'
+        f'<div style="font-size:1.0rem;color:#dbeafe;margin-top:0.35rem;">'
+        f'오늘 진행한 실습에서 이 단원의 세부 수행준거를 얼마나 충족했는지 한눈에 확인하세요.</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ─── 한눈에 보이는 핵심 메트릭 ───
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🎯 오늘의 단원 성취율", f"{overall:.0f}%")
+    m2.metric("✅ 충족한 준거", f"{good_count} / {len(rows)}")
+    m3.metric("⚠ 보완 필요", f"{fix_count}개")
+
+    if guidance_text and guidance_text.strip():
+        st.caption("ℹ️ 가이드 충실도 가중치가 반영된 성취율입니다 (가이드 이행=100%, 자율 수행=70%).")
+
+    # ─── 4개 수행준거별 진행 카드 ───
+    st.markdown(f"#### 📋 세부 수행준거 4가지 — {unit_name}")
+    for idx, row in enumerate(rows):
+        _render_criterion_progress(idx, row)
+
+    # ─── 가벼운 학습 동선 안내 ───
+    weak_rows = [r for r in rows if r["completion"] < 0.4]
+    if weak_rows:
+        with st.container(border=True):
+            st.markdown("##### 🚀 다음 실습 동선 제안")
+            for r in weak_rows[:2]:
+                examples = ", ".join(f"`{k}`" for k in r["example_keywords"][:3])
+                st.markdown(f"- **{r['label']}** — 결과에 {examples} 등의 표현을 포함해 보세요.")
+    elif good_count == len(rows):
+        st.success("🎉 오늘 실습의 핵심 수행준거가 모두 잘 반영되었습니다. 멋진 하루였어요!")
 def gs_app_sheets_ready() -> bool:
     """Secrets 에 [connections.gsheets] 섹션이 있는지 + 실제 연결이 생성되는지 확인한다.
 
@@ -2396,11 +2671,18 @@ def _render_diagnosis_input_tab(
         st.markdown("---")
         st.markdown("#### 🧪 실습 수행 결과 입력")
         st.markdown(
-            '<div style="background:#fffbeb;border-left:5px solid #f59e0b;'
-            'padding:0.7rem 1rem;border-radius:8px;margin-bottom:0.6rem;font-size:1.02rem;">'
-            '💡 <b>작성 팁</b> — 위 미션 카드의 <b>📝 단계 2 기록 가이드</b> 줄을 그대로 복사해 '
-            '4개 카테고리(🛡️ 준비·안전 / 🔍 점검·회로도 / ⚡ 측정·전압 / 🛠️ 판정·조치)별로 정리하면 '
-            'AI 평가에서 충실도(★★★)가 잘 매칭됩니다.</div>',
+            # 글자색을 어두운 슬레이트(#1e293b)로 명시해 라이트/다크 테마 어디서도 명확히 보이게 한다.
+            '<div style="background:#fffbeb;border:1px solid #fde68a;border-left:5px solid #f59e0b;'
+            'padding:0.85rem 1rem;border-radius:10px;margin-bottom:0.7rem;font-size:1.05rem;'
+            'line-height:1.6;color:#1e293b;">'
+            '<span style="color:#b45309;font-weight:800;font-size:1.1rem;">💡 작성 팁</span> '
+            '<span style="color:#1e293b;">— 위 미션 카드의 </span>'
+            '<b style="color:#0f172a;">📝 단계 2 기록 가이드</b>'
+            '<span style="color:#1e293b;"> 줄을 그대로 복사해 </span>'
+            '<b style="color:#0f172a;">4개 카테고리</b>'
+            '<span style="color:#1e293b;">(🛡️ 준비·안전 / 🔍 점검·회로도 / ⚡ 측정·전압 / 🛠️ 판정·조치)별로 '
+            '정리하면 AI 평가에서 충실도(★★★)가 잘 매칭됩니다.</span>'
+            '</div>',
             unsafe_allow_html=True,
         )
         execution_result = st.text_area(
@@ -2591,26 +2873,27 @@ def _render_diagnosis_feedback_tab() -> None:
 
 
 def _render_diagnosis_ncs_tab() -> None:
-    """📈 성취도 분석 탭: [단계 2] 결과 입력이 끝난 뒤에만 분석/레이더를 보여 준다."""
-    st.subheader("📈 성취도 분석 — NCS 능력단위 정렬 결과")
+    """📈 성취도 분석 탭: [단계 2] 결과 입력 후, 오늘 수행한 단원 1개에만 집중해 분석한다."""
+    st.subheader("📈 성취도 분석 — 오늘 수행한 단원에 집중")
     diag_step = st.session_state.get("diag_step", "input")
     if diag_step != "result":
         st.info(
             "📊 성취도 분석은 **[단계 2] 실습 수행 결과** 제출이 끝난 뒤에 생성됩니다.\n\n"
             "• 1단계: 부품·증상 입력 → AI 가이드 받기\n"
             "• 2단계: 가이드를 따라 측정·판단 → 결과 입력 후 제출\n"
-            "• 3단계: 여기에서 NCS 능력단위 성취도 레이더와 가이드 충실도 분석을 확인할 수 있어요."
+            "• 3단계: 여기에서 오늘 단원의 세부 수행준거 4가지 달성 현황을 확인할 수 있어요."
         )
         return
     if st.session_state.get("_just_completed_step2"):
         st.success(
             "🎯 방금 제출한 실습 결과의 성취도 분석이 도착했어요. "
-            "아래 레이더 차트와 단원별 보완 항목을 확인하며 학습을 마무리해 봅시다!"
+            "아래에서 오늘 수행한 단원의 무엇을 잘했고 무엇을 놓쳤는지 확인해 봅시다!"
         )
     render_ncs_achievement(
         st.session_state.get("latest_evaluation", "") or st.session_state.get("latest_execution_result", ""),
         st.session_state.get("latest_mode", "학습 모드"),
         guidance_text=st.session_state.get("latest_guidance", ""),
+        unit_name=st.session_state.get("latest_unit") or "",
     )
 
 
