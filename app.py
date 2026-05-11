@@ -1626,7 +1626,7 @@ def _render_diagnosis_progress(step: str) -> None:
                 text_color = "#14532d"
                 state_icon = "✅"
                 state_text = "Cleared"
-                glow = "box-shadow: 0 2px 6px rgba(22,163,74,0.18);"
+                glow = "box-shadow:0 2px 6px rgba(22,163,74,0.18);"
                 opacity = "1"
             elif col_idx == idx:
                 bg = "linear-gradient(135deg,#fef9c3 0%,#fde68a 50%,#fbbf24 100%)"
@@ -1634,7 +1634,7 @@ def _render_diagnosis_progress(step: str) -> None:
                 text_color = "#7c2d12"
                 state_icon = "🔥"
                 state_text = "진행 중"
-                glow = "box-shadow: 0 0 0 4px rgba(251,191,36,0.25), 0 4px 14px rgba(245,158,11,0.45);"
+                glow = "box-shadow:0 0 0 4px rgba(251,191,36,0.25),0 4px 14px rgba(245,158,11,0.45);"
                 opacity = "1"
             else:
                 bg = "#f1f5f9"
@@ -1644,26 +1644,18 @@ def _render_diagnosis_progress(step: str) -> None:
                 state_text = "Locked"
                 glow = ""
                 opacity = "0.65"
-            badge_html = f"""
-            <div style="
-                background:{bg};
-                border:2px solid {border};
-                border-radius:14px;
-                padding:0.75rem 0.55rem;
-                text-align:center;
-                {glow}
-                opacity:{opacity};
-                min-height:120px;
-                display:flex;
-                flex-direction:column;
-                justify-content:center;
-            ">
-                <div style="font-size:1.35rem; line-height:1;">{state_icon}</div>
-                <div style="font-weight:700; color:{text_color}; font-size:1rem; margin-top:0.35rem;">{label}</div>
-                <div style="font-size:0.78rem; color:{text_color}; margin-top:0.2rem; opacity:0.9;">{desc}</div>
-                <div style="font-size:0.72rem; color:{text_color}; margin-top:0.35rem; font-weight:600; letter-spacing:0.05em;">{state_text}</div>
-            </div>
-            """
+            # NOTE: HTML은 한 줄로 작성한다. 멀티라인 + 들여쓰기는 Streamlit 마크다운에서
+            # 코드 블록으로 잘못 파싱되어 style 속성 일부가 그대로 텍스트로 노출되는 문제가 있다.
+            badge_html = (
+                f'<div style="background:{bg};border:2px solid {border};border-radius:16px;'
+                f'padding:1rem 0.7rem;text-align:center;{glow}opacity:{opacity};'
+                f'min-height:150px;display:flex;flex-direction:column;justify-content:center;">'
+                f'<div style="font-size:1.9rem;line-height:1;">{state_icon}</div>'
+                f'<div style="font-weight:800;color:{text_color};font-size:1.25rem;margin-top:0.45rem;letter-spacing:-0.01em;">{label}</div>'
+                f'<div style="font-size:1.0rem;color:{text_color};margin-top:0.3rem;opacity:0.95;line-height:1.4;">{desc}</div>'
+                f'<div style="font-size:0.92rem;color:{text_color};margin-top:0.5rem;font-weight:700;letter-spacing:0.06em;">{state_text}</div>'
+                f'</div>'
+            )
             st.markdown(badge_html, unsafe_allow_html=True)
     st.markdown("")
 
@@ -2403,6 +2395,38 @@ st.set_page_config(
     page_title="자동차 고장진단 AI tutor",
     page_icon="🚗",
     layout="wide",
+)
+# 전역 글자 크기 업스케일 — 교실 빔 프로젝터/태블릿에서도 잘 보이도록 본문/캡션/입력/버튼 폰트를 키운다.
+st.markdown(
+    """
+    <style>
+      html, body, [class*="st-emotion"] { font-size: 17px; }
+      .stApp { font-size: 17px; line-height: 1.6; }
+      .stApp h1 { font-size: 2.2rem !important; }
+      .stApp h2 { font-size: 1.75rem !important; }
+      .stApp h3 { font-size: 1.4rem !important; }
+      .stApp h4 { font-size: 1.2rem !important; }
+      .stApp h5 { font-size: 1.08rem !important; }
+      .stMarkdown p, .stMarkdown li { font-size: 1.05rem; line-height: 1.65; }
+      [data-testid="stCaptionContainer"], .stCaption, small { font-size: 0.95rem !important; }
+      .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] *,
+      .stNumberInput input, .stDateInput input { font-size: 1.05rem !important; }
+      .stTextInput label, .stTextArea label, .stSelectbox label, .stRadio label,
+      .stCheckbox label, .stFileUploader label { font-size: 1.05rem !important; font-weight: 600 !important; }
+      .stRadio div[role="radiogroup"] label p { font-size: 1.05rem !important; }
+      .stButton button, .stDownloadButton button { font-size: 1.05rem !important; font-weight: 600; padding: 0.55rem 1rem !important; }
+      .stTabs [data-baseweb="tab"] { font-size: 1.1rem !important; font-weight: 600; }
+      [data-testid="stMetricValue"] { font-size: 2.1rem !important; }
+      [data-testid="stMetricLabel"] { font-size: 1.0rem !important; }
+      [data-testid="stMetricDelta"] { font-size: 0.95rem !important; }
+      [data-testid="stExpander"] summary p { font-size: 1.05rem !important; font-weight: 600; }
+      .stDataFrame, .stTable { font-size: 1.0rem !important; }
+      [data-testid="stAlert"] p { font-size: 1.02rem !important; }
+      [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li { font-size: 1.05rem !important; }
+      .stProgress > div > div > div { height: 14px !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 init_session_state()
 if st.session_state.app_role is None:
