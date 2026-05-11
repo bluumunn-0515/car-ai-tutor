@@ -1,8 +1,10 @@
+import base64
 import logging
 import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 import streamlit as st
@@ -270,6 +272,13 @@ def reset_student_session_soft() -> None:
     reset_student_auth_form()
     st.session_state.student_id = ""
     st.session_state.student_display_name = ""
+    # 사이드바 메뉴(학습 모드 / 나의 포트폴리오) 선택도 초기화
+    for k in ("student_view_pick",):
+        if k in st.session_state:
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
     reset_diagnosis_flow()
 
 
@@ -282,12 +291,15 @@ def reset_diagnosis_flow() -> None:
     st.session_state.latest_result = ""
     st.session_state.latest_symptom = ""
     st.session_state.latest_generated_at = ""
+    st.session_state.latest_reflection = ""
+    st.session_state.latest_image_b64 = ""
     for widget_key in (
         "diag_target_part",
         "diag_current_state",
         "diag_learning_question",
         "diag_uploaded_image",
         "diag_execution_result",
+        "diag_reflection",
     ):
         if widget_key in st.session_state:
             try:
@@ -602,6 +614,42 @@ def build_evaluation_prompt(
 - 각 단계는 위 예시처럼 반드시 3줄(타이틀 + 💬 코멘트 + 🛠 보완) 구조로 작성한다. 한 줄도 빠뜨리지 않는다.
 - 규정값은 **굵게**(Markdown bold) 표기.
 """.strip()
+
+
+def make_thumbnail_b64(image_file: Any) -> str:
+    """업로드된 사진을 작은 썸네일(JPEG, base64)로 변환해 포트폴리오 저장용으로 압축한다.
+
+    - Google Sheets 단일 셀 한계(약 50,000자)를 넘기지 않도록 480×480 / quality 60 으로 강하게 압축.
+    - PIL 사용 불가 또는 디코딩 실패 시 빈 문자열을 반환해 호출자가 안전하게 처리한다.
+    """
+    if image_file is None or PILImage is None:
+        return ""
+    try:
+        raw = image_file.getvalue() if hasattr(image_file, "getvalue") else b""
+        if not raw:
+            return ""
+        with PILImage.open(BytesIO(raw)) as im:
+            im.load()
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            im.thumbnail((480, 480), PILImage.LANCZOS)
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=60, optimize=True)
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as exc:
+        logger.warning("포트폴리오 썸네일 생성 실패: %s", exc)
+        return ""
+
+
+def thumbnail_b64_to_bytes(b64: str) -> Optional[bytes]:
+    """포트폴리오 카드/PDF 임베딩용으로 base64 썸네일을 원본 바이트로 되돌린다."""
+    if not b64 or not str(b64).strip():
+        return None
+    try:
+        return base64.b64decode(str(b64).strip())
+    except Exception as exc:
+        logger.warning("썸네일 base64 디코딩 실패: %s", exc)
+        return None
 
 
 def _prepare_image_for_gemini(image_file: Any) -> tuple[bytes, str]:
@@ -1473,10 +1521,12 @@ def build_comprehensive_portfolio_pdf(
     student_name: str,
     records: list[dict],
 ) -> bytes:
-    """학생의 모든 실습 기록을 하나의 PDF로 합쳐 종합 포트폴리오로 만든다.
+    """학기 전체 실습 기록을 한 권의 '나의 성장 일지' PDF로 묶는다.
 
-    표지(학생 정보 + 총 실습 건수) → 기록별 페이지(단원명/입력 증상/AI 가이드/수행 결과/NCS 성취도)
-    순서로 구성한다. 한글 출력을 위해 같은 폴더의 ``malgun.ttf`` 폰트를 사용한다.
+    - 표지: 따뜻한 타이틀(나의 성장 일지) + 학생 정보 + 누적 실습 건수
+    - 본문: 실습별로 ① 메타정보 → ② 수행 내용(입력) → ③ AI 코칭 요약 → ④ 나의 소감 → ⑤ 첨부 사진
+    - 실습 사이에는 가로 구분선을 그어 '기록의 흐름'이 보이도록 한다.
+    - 한글 출력을 위해 같은 폴더의 ``malgun.ttf`` 폰트를 사용한다.
     """
     if FPDF is None:
         raise RuntimeError("fpdf2 라이브러리가 필요합니다.")
@@ -1494,39 +1544,85 @@ def build_comprehensive_portfolio_pdf(
         has_korean_font = False
 
     def _set_font(size: int, bold: bool = False) -> None:
-        # fpdf2 는 동일 TTF 를 굵게 흉내 내기 어렵기 때문에 size 변화로 위계만 표현한다.
+        # fpdf2 의 한글 TTF 는 굵게 흉내가 어렵기 때문에 크기로 위계를 표현한다.
         if has_korean_font:
             pdf.set_font("Malgun", size=size)
         else:
             pdf.set_font("Helvetica", style="B" if bold else "", size=size)
 
-    def _write_block(label: str, body: str) -> None:
-        body_text = (body or "").strip() or "(내용 없음)"
+    def _section_label(label: str) -> None:
+        """섹션 라벨을 컬러 배지처럼 강조한다."""
         _set_font(12, bold=True)
-        pdf.multi_cell(0, 8, f"[{label}]")
+        # 옅은 회색 배경 박스
+        pdf.set_fill_color(241, 245, 249)  # slate-100
+        pdf.set_text_color(15, 23, 42)      # slate-900
+        pdf.cell(0, 8, label, fill=True, ln=1)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(1)
+
+    def _write_block(label: str, body: str, *, allow_empty_caption: bool = True) -> None:
+        body_text = (body or "").strip()
+        _section_label(label)
         _set_font(11)
-        pdf.multi_cell(0, 7, body_text)
+        if body_text:
+            pdf.multi_cell(0, 7, body_text)
+        elif allow_empty_caption:
+            pdf.set_text_color(120, 120, 120)
+            pdf.multi_cell(0, 7, "(내용 없음)")
+            pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
+
+    def _draw_divider() -> None:
+        """실습 기록 사이의 구분선 — '기록의 흐름'이 보이도록."""
+        pdf.ln(3)
+        pdf.set_draw_color(203, 213, 225)  # slate-300
+        y = pdf.get_y()
+        pdf.line(15, y, 195, y)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.ln(4)
+
+    def _embed_image_from_b64(b64: str) -> None:
+        """썸네일 base64 를 PDF 에 이미지로 임베딩한다."""
+        img_bytes = thumbnail_b64_to_bytes(b64)
+        if not img_bytes or PILImage is None:
+            return
+        try:
+            with PILImage.open(BytesIO(img_bytes)) as im:
+                im.load()
+                if im.mode != "RGB":
+                    im = im.convert("RGB")
+                # fpdf2 는 PIL.Image 객체를 직접 받는다 (>=2.6)
+                # 폭 80mm 로 적당히 출력한다.
+                pdf.image(im, w=80)
+            pdf.ln(2)
+        except Exception as exc:
+            logger.warning("PDF 이미지 임베딩 실패: %s", exc)
 
     # ─────────── 표지 ───────────
     pdf.add_page()
-    pdf.ln(20)
-    _set_font(20, bold=True)
-    pdf.multi_cell(0, 14, "자동차 전기전자제어 실습 종합 포트폴리오")
+    pdf.ln(22)
+    _set_font(22, bold=True)
+    pdf.set_text_color(7, 89, 133)  # sky-800
+    pdf.multi_cell(0, 14, "나의 성장 일지")
+    pdf.set_text_color(0, 0, 0)
+    _set_font(13)
+    pdf.multi_cell(0, 9, "Growth Journal — 자동차 전기전자제어 실습 포트폴리오")
     pdf.ln(8)
     _set_font(13)
     pdf.multi_cell(0, 9, f"학생 성명: {student_name or '-'}")
     pdf.multi_cell(0, 9, f"학번: {student_id or '-'}")
-    pdf.multi_cell(0, 9, f"총 실습 건수: {len(records)}건")
+    pdf.multi_cell(0, 9, f"누적 실습 건수: {len(records)}건")
     pdf.multi_cell(0, 9, f"발행일: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    pdf.ln(6)
+    pdf.ln(8)
     _set_font(11)
+    pdf.set_text_color(71, 85, 105)  # slate-600
     pdf.multi_cell(
         0,
         7,
-        "본 포트폴리오는 NCS '자동차 전기전자제어' 능력단위 기반의 실습 기록을 "
-        "시간 순으로 정리한 학습 결과물입니다.",
+        "본 일지는 NCS '자동차 전기전자제어' 능력단위 기반 실습 기록을 시간 순으로 묶은 학습 결과물입니다. "
+        "각 실습 단원의 수행 내용·AI 코칭 요약·실습 소감·첨부 사진을 한 권에 모아 학기 동안의 성장을 보여 줍니다.",
     )
+    pdf.set_text_color(0, 0, 0)
 
     # ─────────── 본문: 실습별 페이지 ───────────
     if not records:
@@ -1536,48 +1632,56 @@ def build_comprehensive_portfolio_pdf(
         return bytes(pdf.output(dest="S"))
 
     sorted_records = sorted(records, key=lambda r: r.get("submitted_at") or "")
+    total = len(sorted_records)
     for idx, rec in enumerate(sorted_records, start=1):
         pdf.add_page()
         guidance_text, evaluation_text = split_combined_result(rec.get("result") or "")
-        score_input_text = evaluation_text or (rec.get("result") or "")
-        try:
-            ncs = calculate_ncs_scores(
-                score_input_text,
-                rec.get("mode") or "학습 모드",
-                guidance_text=guidance_text,
-            )
-            overall_rate = ncs.get("overall_rate", 0.0)
-            unit_scores = ncs.get("unit_scores", [])
-        except Exception:
-            overall_rate = 0.0
-            unit_scores = []
 
-        _set_font(15, bold=True)
-        pdf.multi_cell(0, 10, f"실습 #{idx}")
+        # 실습 #N — 진한 컬러 헤더
+        _set_font(16, bold=True)
+        pdf.set_text_color(124, 45, 18)  # orange-900
+        pdf.multi_cell(0, 11, f"📓 실습 #{idx} / {total}")
+        pdf.set_text_color(0, 0, 0)
         _set_font(11)
         pdf.multi_cell(0, 7, f"진단 일시: {rec.get('submitted_at') or '-'}")
-        pdf.multi_cell(0, 7, f"선택 모드: {rec.get('mode') or '-'}")
+        pdf.multi_cell(0, 7, f"교과 · 단원: {rec.get('subject') or '-'}  >  {rec.get('unit') or '-'}")
         pdf.ln(2)
 
-        _write_block("단원명", rec.get("unit") or "-")
-        _write_block("입력 증상", rec.get("symptom") or "")
-        _write_block("AI 가이드", guidance_text or "(AI 가이드 텍스트가 저장되지 않았습니다.)")
-        _write_block("수행 결과", rec.get("reasoning") or "")
+        # ① 수행 내용 — 학생 입력
+        _write_block("🔍 수행 내용 (대상 / 상태 / 학습 질문)", rec.get("symptom") or "")
 
-        ncs_lines = [f"종합 성취율: {overall_rate:.1f}%"]
-        for us in unit_scores:
-            unit = us.get("unit", "")
-            completion_pct = float(us.get("completion", 0.0)) * 100
-            missing = us.get("missing_labels") or []
-            line = f"- {unit}: {completion_pct:.0f}%"
-            if missing:
-                line += f" / 보완: {', '.join(missing[:2])}"
-            ncs_lines.append(line)
-        if (rec.get("teacher_feedback") or "").strip():
-            ncs_lines.append("")
-            ncs_lines.append("[교사 피드백]")
-            ncs_lines.append(rec["teacher_feedback"].strip())
-        _write_block("NCS 성취도", "\n".join(ncs_lines))
+        # ② AI 코칭 — 가이드 요약
+        guide_short = (guidance_text or "").strip()
+        if guide_short and len(guide_short) > 1200:
+            guide_short = guide_short[:1200] + " …"
+        _write_block(
+            "🧭 AI 코칭 — 미션 가이드 요약",
+            guide_short or "(AI 가이드 텍스트가 저장되지 않았습니다.)",
+        )
+
+        # ③ 수행 결과
+        _write_block("🧪 실습 수행 결과", rec.get("reasoning") or "")
+
+        # ④ 나의 소감
+        _write_block(
+            "📝 나의 소감",
+            rec.get("reflection") or "",
+        )
+
+        # ⑤ 첨부 사진 (있을 때만)
+        image_b64 = (rec.get("image_b64") or "").strip()
+        if image_b64:
+            _section_label("📷 첨부 사진")
+            _embed_image_from_b64(image_b64)
+
+        # 교사 피드백 (있을 때만)
+        tf = (rec.get("teacher_feedback") or "").strip()
+        if tf:
+            _write_block("🗒 교사 피드백", tf)
+
+        # 다음 실습과 시각적으로 분리
+        if idx < total:
+            _draw_divider()
 
     return bytes(pdf.output(dest="S"))
 
@@ -2273,6 +2377,10 @@ def _render_diagnosis_input_tab(
             st.session_state.latest_evaluation = ""
             st.session_state.latest_execution_result = ""
             st.session_state.latest_result = ""
+            # 포트폴리오 저장용 썸네일: 단계 2 제출 시 record 에 함께 기록한다.
+            st.session_state.latest_image_b64 = (
+                make_thumbnail_b64(uploaded_image) if uploaded_image is not None else ""
+            )
             st.session_state.diag_step = "guidance"
             st.rerun()
         return
@@ -2315,6 +2423,25 @@ def _render_diagnosis_input_tab(
             key="diag_execution_result",
             help="미션 카드의 '📝 기록 가이드' 줄을 복사해 4개 카테고리 아래에 붙여 넣고, 실제 측정값으로 숫자를 교체하세요.",
         )
+
+        # ─── 📝 오늘의 실습 소감 ───
+        with st.container(border=True):
+            st.markdown("### 📝 오늘의 실습 소감")
+            st.caption(
+                "오늘 실습에서 어려웠던 점, 새롭게 알게 된 점, 다음 실습에서 더 잘하고 싶은 점을 자유롭게 적어 주세요. "
+                "여기에 적은 소감은 [나의 포트폴리오 — 성장 일지]에 그대로 보관됩니다."
+            )
+            reflection = st.text_area(
+                "실습 소감",
+                placeholder=(
+                    "예시) 처음에는 OCV 측정 시 리드봉 접촉 위치가 헷갈렸지만, 회로도에서 단자 위치를 먼저 확인하고 측정하니 "
+                    "값이 안정적으로 나왔다. 다음에는 부하 인가 상태에서의 전압강하 측정도 함께 해 보고 싶다."
+                ),
+                height=160,
+                key="diag_reflection",
+                label_visibility="collapsed",
+            )
+
         col_back, col_submit = st.columns([1, 2])
         with col_back:
             if st.button("← 1단계로 돌아가기"):
@@ -2370,7 +2497,11 @@ def _render_diagnosis_input_tab(
                 "result": combined_result,
                 "teacher_feedback": "",
                 "teacher_feedback_updated_at": "",
+                "reflection": (reflection or "").strip(),
+                "image_b64": st.session_state.get("latest_image_b64", "") or "",
             }
+            # 단계 3 표시용으로 소감을 세션에도 남긴다.
+            st.session_state.latest_reflection = (reflection or "").strip()
             try:
                 append_diagnostic_record(record)
                 shb.invalidate_all_sheet_caches()
@@ -2483,117 +2614,185 @@ def _render_diagnosis_ncs_tab() -> None:
     )
 
 
-def _render_student_growth_dashboard() -> None:
-    """학생 본인의 누적 실습 기록을 메트릭 + 레이더 중심으로 시각화한 '성장 대시보드'."""
+def _format_week_key(submitted_at: str) -> tuple[str, str]:
+    """제출 일시(YYYY-MM-DD HH:MM:SS) → (week_key, sort_key) 변환.
+
+    - week_key: "2026년 19주차 (5/4 ~ 5/10)" 형태의 한국어 라벨 (UI 표시용)
+    - sort_key: "2026-W19" — 그룹 정렬용
+    """
+    try:
+        dt = datetime.strptime((submitted_at or "")[:10], "%Y-%m-%d")
+    except Exception:
+        return ("기타", "9999-W99")
+    year, week, _ = dt.isocalendar()
+    # 해당 ISO 주의 월요일(시작일) 계산
+    try:
+        monday = datetime.fromisocalendar(year, week, 1)
+        sunday = datetime.fromisocalendar(year, week, 7)
+        label = f"{year}년 {week}주차 ({monday.month}/{monday.day} ~ {sunday.month}/{sunday.day})"
+    except Exception:
+        label = f"{year}년 {week}주차"
+    return (label, f"{year}-W{week:02d}")
+
+
+def _render_portfolio_card(rec: dict) -> None:
+    """포트폴리오 한 건의 expander 카드 — 날짜·단원·수행·AI 코칭·소감·사진을 깔끔하게 흐름 정리."""
+    submitted_at = rec.get("submitted_at") or "-"
+    date_part = submitted_at[:10] if submitted_at != "-" else "-"
+    time_part = submitted_at[11:16] if len(submitted_at) >= 16 else ""
+    unit_name = rec.get("unit") or "-"
+    icon = UNIT_ICONS.get(unit_name, "📘")
+    title = f"📅 {date_part} {time_part} · {icon} {unit_name}"
+
+    with st.expander(title, expanded=False):
+        # 수행 내용 — 학생이 입력한 [대상/상태/질문] 요약
+        symptom = (rec.get("symptom") or "").strip()
+        if symptom:
+            st.markdown("**🔍 수행 내용 — 대상 / 상태 / 학습 질문**")
+            st.code(symptom, language="text")
+
+        # AI 코칭 — 가이드 텍스트의 앞부분(미션 요약 + 첫 카테고리)을 요약 노출
+        combined = rec.get("result") or ""
+        guidance_text, _eval_text = split_combined_result(combined)
+        if guidance_text.strip():
+            st.markdown("**🧭 AI 코칭 — 미션 가이드 요약**")
+            preview = guidance_text.strip()
+            preview = preview[:600] + (" …" if len(preview) > 600 else "")
+            with st.container(border=True):
+                st.markdown(preview)
+
+        # 나의 소감 — 노란 하이라이트 카드
+        reflection = (rec.get("reflection") or "").strip()
+        st.markdown("**📝 나의 소감**")
+        if reflection:
+            st.markdown(
+                '<div style="background:#fefce8;border-left:5px solid #facc15;'
+                'padding:0.8rem 1rem;border-radius:8px;font-size:1.02rem;line-height:1.6;">'
+                f'{reflection}'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("(소감이 기록되어 있지 않습니다.)")
+
+        # 첨부 사진 — 썸네일 base64 복원
+        image_b64 = (rec.get("image_b64") or "").strip()
+        if image_b64:
+            img_bytes = thumbnail_b64_to_bytes(image_b64)
+            if img_bytes:
+                st.markdown("**📷 첨부 사진**")
+                st.image(img_bytes, width=360)
+
+        # 교사 피드백 (있을 때만)
+        tf = (rec.get("teacher_feedback") or "").strip()
+        if tf:
+            st.markdown("**🗒 교사 피드백**")
+            st.success(tf)
+
+
+def _render_portfolio_view() -> None:
+    """📓 나의 포트폴리오 — 누적 실습 기록을 '성장 일지'처럼 주차별 카드로 보여준다.
+
+    UI 다이어트 방침에 따라 메트릭/레이더 차트는 보여 주지 않고,
+    날짜 → 단원 → 수행 → AI 코칭 → 소감 → 사진의 '기록 흐름'만 깔끔하게 노출한다.
+    """
     student_id = st.session_state.get("student_id") or ""
     student_name = (st.session_state.get("student_display_name") or "").strip() or student_id
-    with st.expander("📈 나의 학습 성장 대시보드", expanded=True):
-        my_records = [
-            r for r in get_diagnostic_records()
-            if r.get("student_id") == student_id
-        ]
-        if not my_records:
-            st.info("첫 실습을 시작해보세요!")
-            return
 
-        # ─── 핵심 메트릭 4종 ───
-        total_count = len(my_records)
-        labels, values = compute_class_average_unit_scores(my_records)
-        avg_score = sum(values) / len(values) if values else 0.0
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 50%,#fbbf24 100%);'
+        f'padding:1.2rem 1.4rem;border-radius:14px;border:1px solid #f59e0b;'
+        f'box-shadow:0 4px 14px rgba(245,158,11,0.2);margin-bottom:1.2rem;">'
+        f'<div style="font-size:1.65rem;font-weight:800;color:#7c2d12;letter-spacing:-0.01em;">'
+        f'📓 나의 성장 일지 — Growth Journal</div>'
+        f'<div style="font-size:1.05rem;color:#78350f;margin-top:0.35rem;">'
+        f'{student_name} 학생의 자동차 전기전자제어 실습 기록을 주차별로 모아 보여줍니다.</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
-        if values:
-            best_idx = max(range(len(values)), key=lambda i: values[i])
-            weak_idx = min(range(len(values)), key=lambda i: values[i])
-            best_unit = f"{labels[best_idx]} {values[best_idx]:.0f}%"
-            weak_unit = f"{labels[weak_idx]} {values[weak_idx]:.0f}%"
-        else:
-            best_unit = "-"
-            weak_unit = "-"
+    if not gs_app_sheets_ready():
+        st.info("Google Sheets 연결 준비 중입니다. 잠시 후 다시 시도해 주세요.")
+        return
 
-        # 최근 1건과 직전 평균을 비교해 성장 폭(델타)을 보여준다.
-        recent_score_delta: Optional[float] = None
-        try:
-            sorted_recs = sorted(my_records, key=lambda r: r.get("submitted_at") or "")
-            if len(sorted_recs) >= 2:
-                latest = sorted_recs[-1]
-                prior = sorted_recs[:-1]
-                lg, ev = split_combined_result(latest.get("result") or "")
-                latest_score = calculate_ncs_scores(
-                    ev or latest.get("result") or "",
-                    latest.get("mode") or "학습 모드",
-                    guidance_text=lg,
-                )["overall_rate"]
-                prior_labels, prior_values = compute_class_average_unit_scores(prior)
-                prior_avg = sum(prior_values) / len(prior_values) if prior_values else 0.0
-                recent_score_delta = latest_score - prior_avg
-        except Exception:
-            recent_score_delta = None
-
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("🎯 누적 실습", f"{total_count}회")
-        m2.metric(
-            "📊 평균 성취율",
-            f"{avg_score:.1f}%",
-            delta=(f"최근 {recent_score_delta:+.1f}%p" if recent_score_delta is not None else None),
+    all_records = [r for r in get_diagnostic_records() if r.get("student_id") == student_id]
+    if not all_records:
+        st.info(
+            "아직 저장된 실습 기록이 없습니다. 사이드바의 **[🧑‍🏫 학습 모드]**에서 첫 실습을 시작해 보세요!"
         )
-        m3.metric("🌟 강점 단원", best_unit)
-        m4.metric("🔧 보완 단원", weak_unit)
+        return
 
-        # ─── 개인 성취도 레이더 (대시보드 중앙) ───
-        if labels and go is not None:
-            labels_closed = labels + [labels[0]]
-            values_closed = values + [values[0]]
-            fig = go.Figure(
-                data=[
-                    go.Scatterpolar(
-                        r=values_closed,
-                        theta=labels_closed,
-                        fill="toself",
-                        name="개인 성취율(%)",
-                        line={"color": "#22c55e"},
-                        fillcolor="rgba(34,197,94,0.25)",
-                    )
-                ]
-            )
-            fig.update_layout(
-                polar={"radialaxis": {"visible": True, "range": [0, 100]}},
-                showlegend=False,
-                margin={"l": 30, "r": 30, "t": 30, "b": 20},
-                height=320,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        elif go is None:
-            st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
+    # 오래된 → 최신 순으로 정렬 후 주차별 그룹화
+    sorted_records = sorted(all_records, key=lambda r: r.get("submitted_at") or "")
 
-        # ─── 포트폴리오 PDF (보조 기능 — 평소엔 접힘) ───
-        if FPDF is not None:
-            with st.expander("🎓 종합 포트폴리오 PDF 다운로드", expanded=False):
-                try:
-                    portfolio_bytes = build_comprehensive_portfolio_pdf(
-                        student_id=student_id,
-                        student_name=student_name,
-                        records=my_records,
-                    )
-                    st.download_button(
-                        "PDF로 내려받기",
-                        data=portfolio_bytes,
-                        file_name=(
-                            f"comprehensive_portfolio_{student_id or 'student'}_"
-                            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                        ),
-                        mime="application/pdf",
-                        use_container_width=True,
-                    )
-                except Exception as exc:
-                    st.error(f"종합 포트폴리오 PDF 생성 중 오류가 발생했습니다: {exc}")
+    from collections import OrderedDict
+    weekly: "OrderedDict[str, list[dict]]" = OrderedDict()
+    sort_keys: dict[str, str] = {}
+    for rec in sorted_records:
+        label, sort_key = _format_week_key(rec.get("submitted_at") or "")
+        weekly.setdefault(label, []).append(rec)
+        sort_keys[label] = sort_key
+    # 최신 주차가 위로 오도록 재정렬
+    weekly = OrderedDict(
+        sorted(weekly.items(), key=lambda kv: sort_keys.get(kv[0], "9999-W99"), reverse=True)
+    )
+
+    # 상단 요약 캡션 (수치 없이 흐름 위주)
+    st.caption(
+        f"✨ 누적 실습 **{len(sorted_records)}건** · 시작 {sorted_records[0].get('submitted_at', '')[:10]} "
+        f"~ 최근 {sorted_records[-1].get('submitted_at', '')[:10]}"
+    )
+
+    for week_label, week_records in weekly.items():
+        st.markdown(
+            f'<div style="margin-top:1.4rem;margin-bottom:0.5rem;padding:0.55rem 1rem;'
+            f'background:#eff6ff;border-left:5px solid #2563eb;border-radius:8px;'
+            f'font-weight:700;font-size:1.18rem;color:#1e3a8a;">'
+            f'📅 {week_label} — 실습 {len(week_records)}건</div>',
+            unsafe_allow_html=True,
+        )
+        # 같은 주차 안에서는 최신이 위로 오게
+        for rec in sorted(week_records, key=lambda r: r.get("submitted_at") or "", reverse=True):
+            _render_portfolio_card(rec)
+
+    # ─── 학기말 최종 포트폴리오 PDF ───
+    st.markdown("---")
+    st.markdown(
+        '<div style="background:linear-gradient(135deg,#dcfce7 0%,#86efac 100%);'
+        'padding:1rem 1.2rem;border-radius:12px;border:1px solid #22c55e;'
+        'margin:1rem 0 0.8rem 0;">'
+        '<div style="font-size:1.35rem;font-weight:800;color:#14532d;">🎓 학기말 최종 포트폴리오</div>'
+        '<div style="font-size:1.0rem;color:#166534;margin-top:0.35rem;">'
+        '지금까지의 모든 실습·소감·첨부 사진을 한 권의 PDF 성장 일지로 묶어 내려받을 수 있어요.</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    if FPDF is None:
+        st.info("PDF 저장 기능을 사용하려면 `pip install fpdf2`를 실행해 주세요.")
+        return
+    try:
+        portfolio_bytes = build_comprehensive_portfolio_pdf(
+            student_id=student_id,
+            student_name=student_name,
+            records=sorted_records,
+        )
+        st.download_button(
+            "🎓 학기말 최종 포트폴리오 생성 & 다운로드",
+            data=portfolio_bytes,
+            file_name=(
+                f"growth_journal_{student_id or 'student'}_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            ),
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+        )
+    except Exception as exc:
+        st.error(f"학기말 포트폴리오 PDF 생성 중 오류가 발생했습니다: {exc}")
 
 
 def render_student_mode() -> None:
     sname = (st.session_state.get("student_display_name") or "").strip() or "학생"
-    st.success(f"안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
-    st.header("학생 학습 경로")
-    st.caption("교과·단원을 고른 뒤 AI 튜터와 실습하고, 포트폴리오 PDF로 정리할 수 있습니다.")
-    _render_student_growth_dashboard()
     with st.sidebar:
         st.header("학생 설정")
         st.caption(
@@ -2606,12 +2805,33 @@ def render_student_mode() -> None:
             st.success("Streamlit Secrets에서 API 키를 불러왔습니다.")
         else:
             api_key = st.text_input("API 키 입력 (로컬 테스트용)", type="password").strip()
-        mode = st.radio("운영 모드 선택", ["학습 모드", "평가 모드"], index=0)
+
+        # ── 메뉴(view) — 학습 모드 / 나의 포트폴리오 ──
+        view = st.radio(
+            "메뉴",
+            ["🧑‍🏫 학습 모드", "📓 나의 포트폴리오"],
+            index=0,
+            key="student_view_pick",
+            help="학습 모드: 단원을 골라 새로운 실습을 진행합니다. 나의 포트폴리오: 누적 실습 기록을 성장 일지처럼 모아보고 학기말 PDF로 저장합니다.",
+        )
         if not api_key:
             st.info("Gemini API 키를 입력해 주세요.")
         st.markdown("#### 반영 NCS 능력단위 (참고)")
         for unit in NCS_UNITS:
             st.markdown(f"- {unit}")
+
+    # ── '평가 모드'는 메뉴에서 제거되었지만 AI 호출 인자는 그대로 살려 학습 톤을 적용한다. ──
+    mode = "학습 모드"
+
+    # ── 사이드바 메뉴 분기 ──
+    if "포트폴리오" in view:
+        _render_portfolio_view()
+        return
+
+    st.success(f"안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
+    st.header("학생 학습 경로")
+    st.caption("교과·단원을 고른 뒤 AI 튜터와 실습하고, 누적 기록은 [📓 나의 포트폴리오] 메뉴에서 확인할 수 있어요.")
+
     selected_subject = "자동차 전기전자제어"
     unit_choices = CURRICULUM[selected_subject]
     st.markdown("#### 🎯 오늘 어떤 실습을 할까요?")
@@ -2652,57 +2872,7 @@ def render_student_mode() -> None:
         _render_diagnosis_feedback_tab()
     with tab_ncs:
         _render_diagnosis_ncs_tab()
-    st.markdown("### 나의 진단 이력")
-    mine = [r for r in get_diagnostic_records() if r.get("student_id") == st.session_state.get("student_id")]
-    if mine:
-        for item in reversed(mine):
-            combined_result = item.get("result") or ""
-            guidance_text, evaluation_text = split_combined_result(combined_result)
-            score_input_text = evaluation_text or combined_result
-            try:
-                ncs = calculate_ncs_scores(
-                    score_input_text,
-                    item.get("mode") or "학습 모드",
-                    guidance_text=guidance_text,
-                )
-                overall_rate = ncs.get("overall_rate", 0.0)
-            except Exception:
-                overall_rate = 0.0
-            submitted_at = item.get("submitted_at") or "-"
-            unit_name = item.get("unit") or "-"
-            title = f"📅 {submitted_at} | {unit_name} | 성취도 {overall_rate:.1f}%"
-            with st.expander(title):
-                st.markdown("**🧭 AI 가이드 요약**")
-                if guidance_text.strip():
-                    summary_src = guidance_text.strip()
-                    summary_preview = summary_src[:300] + ("…" if len(summary_src) > 300 else "")
-                    st.markdown(summary_preview)
-                else:
-                    st.caption("저장된 AI 가이드 텍스트가 없습니다.")
-                st.markdown("**🗒 교사 피드백**")
-                if (item.get("teacher_feedback") or "").strip():
-                    st.success("교사 피드백이 등록되어 있습니다. [상세 보기]에서 전체 내용을 확인할 수 있어요.")
-                else:
-                    st.caption("아직 교사 피드백이 없습니다.")
-                if st.button(
-                    "🔎 상세 보기",
-                    key=f"history_detail_{item.get('record_id', submitted_at)}",
-                    use_container_width=True,
-                ):
-                    st.session_state.latest_result = combined_result
-                    st.session_state.latest_guidance = guidance_text
-                    st.session_state.latest_evaluation = evaluation_text
-                    st.session_state.latest_execution_result = item.get("reasoning") or ""
-                    st.session_state.latest_symptom = item.get("symptom") or ""
-                    st.session_state.latest_subject = item.get("subject") or ""
-                    st.session_state.latest_unit = item.get("unit") or ""
-                    st.session_state.latest_mode = item.get("mode") or "학습 모드"
-                    st.session_state.latest_generated_at = submitted_at
-                    st.session_state.diag_step = "result"
-                    st.toast("이전 실습 이력을 불러왔어요. [🔍 AI 코칭] 탭에서 확인하세요.", icon="📂")
-                    st.rerun()
-    else:
-        st.caption("이 계정으로 저장된 진단 이력이 없습니다.")
+    st.caption("📌 누적 실습 기록은 사이드바의 [📓 나의 포트폴리오] 메뉴에서 주차별 성장 일지 형태로 모아볼 수 있어요.")
 
 
 def init_session_state() -> None:
@@ -2720,6 +2890,8 @@ def init_session_state() -> None:
         "latest_guidance": "",
         "latest_evaluation": "",
         "latest_execution_result": "",
+        "latest_reflection": "",
+        "latest_image_b64": "",
     }
     for key, val in defaults.items():
         if key not in st.session_state:

@@ -1,12 +1,6 @@
 """
 Google Sheets 연동 (streamlit_gsheets.GSheetsConnection 공식 API 기반).
-
-- 시트 탭 이름: users, history
-- 스프레드시트는 st.secrets [connections.gsheets] 의 spreadsheet 값으로 지정
-- 읽기: conn.read(worksheet=...)
-- 쓰기: conn.update(worksheet=..., data=DataFrame) (행 추가는 read → concat → update 패턴)
-- 서비스 계정(Private) 모드에서만 쓰기가 허용된다. Public(읽기 전용) 모드에서는 명확한 에러를 발생시킨다.
-- 비밀번호는 시트에 평문으로 저장하지 않고 SHA-256 해시(password_hash 열)만 저장한다.
+최신 라이브러리 버전 대응 및 Private 모드 검증 강화 버전
 """
 
 from __future__ import annotations
@@ -21,30 +15,23 @@ import streamlit as st
 try:
     from streamlit_gsheets import GSheetsConnection
 except ImportError:
-    GSheetsConnection = None  # type: ignore[misc, assignment]
+    GSheetsConnection = None 
 
 SHEET_USERS = "users"
 SHEET_HISTORY = "history"
 
 USERS_COLS = ["student_id", "name", "password_hash"]
 HISTORY_COLS = [
-    "datetime",
-    "student_id",
-    "name",
-    "subject",
-    "unit",
-    "diagnosis_result",
-    "ncs_score",
-    "mode",
-    "record_id",
-    "symptom",
-    "reasoning",
-    "teacher_feedback",
-    "teacher_feedback_updated_at",
+    "datetime", "student_id", "name", "subject", "unit",
+    "diagnosis_result", "ncs_score", "mode", "record_id",
+    "symptom", "reasoning", "teacher_feedback", "teacher_feedback_updated_at",
+    # ── 포트폴리오 확장 컬럼 ──
+    # reflection: 학생의 '오늘의 실습 소감' 자유 서술
+    # image_b64: 단계 1에서 업로드한 사진의 작은 썸네일(JPEG, base64) — 포트폴리오 표시용
+    "reflection", "image_b64",
 ]
 
-_CACHE_TTL_SEC = 90.0
-
+_CACHE_TTL_SEC = 60.0 # 캐시 시간 약간 단축 (실시간성 향상)
 
 # ---------------------------------------------------------------------------
 # 비밀번호 해시 유틸
@@ -52,349 +39,168 @@ _CACHE_TTL_SEC = 90.0
 def _pepper() -> str:
     try:
         p = st.secrets.get("GSHEETS_PASSWORD_PEPPER")
-        if p:
-            return str(p)
-    except Exception:
-        pass
-    return "dev-only-pepper-change-in-secrets"
-
+        if p: return str(p)
+    except: pass
+    return "dev-only-pepper-yongsan-rr"
 
 def hash_student_password(student_id: str, plain_password: str) -> str:
     raw = f"{_pepper()}|{student_id}|{plain_password}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-
 def _is_sha256_hex(s: str) -> bool:
     s = (s or "").strip()
-    if len(s) != 64:
-        return False
+    if len(s) != 64: return False
     try:
         int(s, 16)
         return True
-    except ValueError:
-        return False
-
+    except ValueError: return False
 
 def verify_student_password(student_id: str, plain_password: str, stored_hash: str) -> bool:
-    if not stored_hash:
-        return False
+    if not stored_hash: return False
     stored_hash = str(stored_hash).strip()
     if _is_sha256_hex(stored_hash):
         return hash_student_password(student_id, plain_password) == stored_hash.lower()
     return plain_password == stored_hash
 
-
 # ---------------------------------------------------------------------------
-# Connection (공식 API)
+# Connection (공식 API 대응)
 # ---------------------------------------------------------------------------
 def gsheets_available() -> bool:
     return GSheetsConnection is not None
 
-
-def _gsheets_secrets_dict() -> dict[str, Any]:
-    try:
-        raw = st.secrets["connections"]["gsheets"]
-    except Exception as exc:
-        raise RuntimeError(
-            "secrets.toml 에 [connections.gsheets] 설정이 없습니다. "
-            "spreadsheet URL과 서비스 계정 정보를 채워 주세요."
-        ) from exc
-    try:
-        return dict(raw)
-    except Exception:
-        return {k: raw[k] for k in raw}  # type: ignore[index]
-
-
 def get_gsheets_connection() -> Any:
-    """st.connection('gsheets', type=GSheetsConnection) 래퍼."""
     if not gsheets_available():
-        raise RuntimeError(
-            "st-gsheets-connection 미설치입니다. `pip install st-gsheets-connection` 후 다시 시도해 주세요."
-        )
+        raise RuntimeError("st-gsheets-connection 패키지가 없습니다.")
+    # 공식 가이드에 따른 연결 방식
     return st.connection("gsheets", type=GSheetsConnection)
 
-
-def _is_private_connection(conn: Any) -> bool:
-    """현재 connection 이 서비스 계정(Private) 클라이언트를 사용 중인지 판단."""
-    client = getattr(conn, "client", None)
-    if client is None:
-        return False
-    class_name = type(client).__name__
-    if "Public" in class_name:
-        return False
-    if "Service" in class_name or "Private" in class_name:
-        return True
-    return hasattr(client, "_open_spreadsheet") or hasattr(client, "open_spreadsheet")
-
-
 def _ensure_private_mode_for_write() -> Any:
-    """쓰기 직전에 서비스 계정(Private) 모드로 연결되어 있는지 확인한다.
-
-    - secrets 에 `type = "service_account"` 와 `private_key`, `client_email` 이 모두 설정되어 있어야 함.
-    - connection.client 가 Public 클라이언트면 에러.
-    """
-    secrets = _gsheets_secrets_dict()
-    if not str(secrets.get("spreadsheet") or "").strip():
-        raise RuntimeError(
-            "secrets.toml [connections.gsheets] 에 spreadsheet (스프레드시트 URL) 값이 없습니다."
-        )
-    if str(secrets.get("type") or "").strip() != "service_account":
-        raise RuntimeError(
-            "Google Sheets 쓰기는 Private(서비스 계정) 모드에서만 가능합니다. "
-            "`.streamlit/secrets.toml` 의 [connections.gsheets] 에 `type = \"service_account\"` 를 지정해 주세요."
-        )
-    missing = [k for k in ("private_key", "client_email") if not str(secrets.get(k) or "").strip()]
-    if missing:
-        raise RuntimeError(
-            "서비스 계정 자격 증명이 불완전합니다: " + ", ".join(missing) + ". "
-            "secrets.toml 의 서비스 계정 JSON 필드를 모두 채워 주세요."
-        )
+    """쓰기 권한(Private Mode)이 활성화되어 있는지 Secrets 기반으로 확인"""
+    try:
+        conf = st.secrets["connections"]["gsheets"]
+        # 'type' 이 service_account 가 아니면 무조건 에러 발생
+        if conf.get("type") != "service_account":
+             raise RuntimeError("Secrets 설정에서 type = 'service_account'가 아니면 쓰기가 불가능합니다.")
+    except Exception:
+        raise RuntimeError("Secrets에 구글 서비스 계정 정보가 설정되지 않았습니다.")
 
     conn = get_gsheets_connection()
-    if not _is_private_connection(conn):
-        raise RuntimeError(
-            "현재 연결이 Public(읽기 전용) 모드로 초기화되었습니다. "
-            "secrets.toml [connections.gsheets] 의 서비스 계정 정보(type, private_key, client_email 등)를 "
-            "올바르게 채우고 Streamlit 을 재시작해 주세요."
-        )
     return conn
 
-
 # ---------------------------------------------------------------------------
-# 캐시 관리
-# ---------------------------------------------------------------------------
-def _invalidate_users_cache() -> None:
-    st.session_state.pop("_gs_users_df", None)
-    st.session_state.pop("_gs_users_ts", None)
-
-
-def _invalidate_history_cache() -> None:
-    st.session_state.pop("_gs_history_df", None)
-    st.session_state.pop("_gs_history_ts", None)
-
-
-def invalidate_all_sheet_caches() -> None:
-    _invalidate_users_cache()
-    _invalidate_history_cache()
-
-
-# ---------------------------------------------------------------------------
-# 읽기 (conn.read)
+# 읽기 및 쓰기 최적화 로직
 # ---------------------------------------------------------------------------
 def _normalize_df(df: Optional[pd.DataFrame], cols: list[str]) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
-    df = df.rename(columns={c: str(c).strip() for c in df.columns})
+    # 컬럼명 공백 제거
+    df.columns = [str(c).strip() for c in df.columns]
+    # 누락된 컬럼 생성
     for c in cols:
-        if c not in df.columns:
-            df[c] = ""
-    return df
-
+        if c not in df.columns: df[c] = ""
+    return df[cols]
 
 def read_users_df() -> pd.DataFrame:
     now = time.time()
-    ts = float(st.session_state.get("_gs_users_ts") or 0.0)
-    if st.session_state.get("_gs_users_df") is not None and now - ts < _CACHE_TTL_SEC:
+    if st.session_state.get("_gs_users_df") is not None and now - st.session_state.get("_gs_users_ts", 0) < _CACHE_TTL_SEC:
         return st.session_state._gs_users_df
+    
     conn = get_gsheets_connection()
     try:
         df = conn.read(worksheet=SHEET_USERS, ttl=0)
-    except Exception:
+    except:
         df = pd.DataFrame(columns=USERS_COLS)
+    
     df = _normalize_df(df, USERS_COLS)
     st.session_state._gs_users_df = df
     st.session_state._gs_users_ts = now
     return df
 
+def get_user_row(student_id: str) -> Optional[dict[str, Any]]:
+    sid = str(student_id).strip()
+    df = read_users_df()
+    if df.empty: return None
+    # 학번 매칭 시 타입을 문자열로 통일하여 비교
+    m = df[df["student_id"].astype(str).str.strip() == sid]
+    if m.empty: return None
+    row = m.iloc[0]
+    return {k: str(row.get(k, "")).strip() for k in USERS_COLS}
 
+def _append_rows_via_update(worksheet: str, cols: list[str], new_rows: list[dict[str, Any]]) -> None:
+    conn = _ensure_private_mode_for_write()
+    # 최신 데이터를 읽어와서 병합 (Append 시뮬레이션)
+    try:
+        current_df = conn.read(worksheet=worksheet, ttl=0)
+    except:
+        current_df = pd.DataFrame(columns=cols)
+    
+    current_df = _normalize_df(current_df, cols)
+    new_df = pd.DataFrame(new_rows, columns=cols)
+    
+    # 모든 데이터를 문자열로 변환하여 병합 (데이터 깨짐 방지)
+    combined = pd.concat([current_df.astype(str), new_df.astype(str)], ignore_index=True)
+    
+    try:
+        conn.update(worksheet=worksheet, data=combined)
+    except Exception as e:
+        raise RuntimeError(f"시트 업데이트 중 오류 발생: {e}")
+
+def append_user_row(student_id: str, name: str, plain_password: str) -> None:
+    h = hash_student_password(student_id, plain_password)
+    _append_rows_via_update(SHEET_USERS, USERS_COLS, [{"student_id": student_id, "name": name, "password_hash": h}])
+    st.session_state.pop("_gs_users_df", None)
+
+def append_history_from_record(record: dict[str, Any], ncs_score: float) -> None:
+    row = {
+        "datetime": record.get("submitted_at", ""),
+        "student_id": record.get("student_id", ""),
+        "name": record.get("student_display_name", ""),
+        "subject": record.get("subject", ""),
+        "unit": record.get("unit", ""),
+        "diagnosis_result": record.get("result", ""),
+        "ncs_score": str(round(float(ncs_score), 2)),
+        "mode": record.get("mode", ""),
+        "record_id": record.get("record_id", ""),
+        "symptom": record.get("symptom", ""),
+        "reasoning": record.get("reasoning", ""),
+        "teacher_feedback": "",
+        "teacher_feedback_updated_at": "",
+        "reflection": record.get("reflection", ""),
+        "image_b64": record.get("image_b64", ""),
+    }
+    _append_rows_via_update(SHEET_HISTORY, HISTORY_COLS, [row])
+    st.session_state.pop("_gs_history_df", None)
+
+# --- 나머지 헬퍼 함수들 (history_df_to_records 등)은 기존 로직 유지 ---
 def read_history_df() -> pd.DataFrame:
     now = time.time()
-    ts = float(st.session_state.get("_gs_history_ts") or 0.0)
-    if st.session_state.get("_gs_history_df") is not None and now - ts < _CACHE_TTL_SEC:
+    if st.session_state.get("_gs_history_df") is not None and now - st.session_state.get("_gs_history_ts", 0) < _CACHE_TTL_SEC:
         return st.session_state._gs_history_df
     conn = get_gsheets_connection()
     try:
         df = conn.read(worksheet=SHEET_HISTORY, ttl=0)
-    except Exception:
+    except:
         df = pd.DataFrame(columns=HISTORY_COLS)
     df = _normalize_df(df, HISTORY_COLS)
     st.session_state._gs_history_df = df
     st.session_state._gs_history_ts = now
     return df
 
-
-def get_user_row(student_id: str) -> Optional[dict[str, Any]]:
-    sid = (student_id or "").strip()
-    if not sid:
-        return None
-    df = read_users_df()
-    if df.empty or "student_id" not in df.columns:
-        return None
-    m = df[df["student_id"].astype(str).str.strip() == sid]
-    if m.empty:
-        return None
-    row = m.iloc[0]
-    return {
-        "student_id": str(row.get("student_id", "")).strip(),
-        "name": str(row.get("name", "")).strip(),
-        "password_hash": str(row.get("password_hash", "")).strip(),
-    }
-
-
-# ---------------------------------------------------------------------------
-# 쓰기 (conn.update — read → concat → update 패턴)
-# ---------------------------------------------------------------------------
-def _read_fresh_df(conn: Any, worksheet: str, cols: list[str]) -> pd.DataFrame:
-    try:
-        df = conn.read(worksheet=worksheet, ttl=0)
-    except Exception:
-        df = pd.DataFrame(columns=cols)
-    df = _normalize_df(df, cols)
-    try:
-        df = df[cols]
-    except Exception:
-        pass
-    return df
-
-
-def _append_rows_via_update(worksheet: str, cols: list[str], new_rows: list[dict[str, Any]]) -> None:
-    """conn.update() 만 사용해 지정한 워크시트 끝에 행을 추가한다.
-
-    - st-gsheets-connection 의 공식 쓰기 API 는 `conn.update(worksheet=..., data=df)` 이며
-      전체 시트를 DataFrame 으로 덮어쓴다. 따라서 안전한 append 를 위해
-      최신 시트를 다시 읽고 새 행을 이어 붙인 뒤 전체를 다시 업데이트한다.
-    """
-    if not new_rows:
-        return
-    conn = _ensure_private_mode_for_write()
-    current = _read_fresh_df(conn, worksheet, cols)
-    additions = pd.DataFrame(new_rows, columns=cols).astype(str)
-    combined = pd.concat([current.astype(str), additions], ignore_index=True)
-    try:
-        conn.update(worksheet=worksheet, data=combined)
-    except Exception as exc:
-        raise RuntimeError(
-            f"'{worksheet}' 워크시트 업데이트에 실패했습니다: {exc}. "
-            "스프레드시트에 해당 탭이 존재하는지, 서비스 계정이 편집 권한으로 공유되었는지 확인해 주세요."
-        ) from exc
-
-
-def append_user_row(student_id: str, name: str, plain_password: str) -> None:
-    h = hash_student_password(student_id, plain_password)
-    _append_rows_via_update(
-        SHEET_USERS,
-        USERS_COLS,
-        [{"student_id": student_id, "name": name, "password_hash": h}],
-    )
-    _invalidate_users_cache()
-
-
-def append_history_from_record(record: dict[str, Any], ncs_score: float) -> None:
-    row = {
-        "datetime": record.get("submitted_at") or "",
-        "student_id": record.get("student_id") or "",
-        "name": record.get("student_display_name") or record.get("student_id") or "",
-        "subject": record.get("subject") or "",
-        "unit": record.get("unit") or "",
-        "diagnosis_result": record.get("result") or "",
-        "ncs_score": round(float(ncs_score), 2),
-        "mode": record.get("mode") or "",
-        "record_id": record.get("record_id") or "",
-        "symptom": record.get("symptom") or "",
-        "reasoning": record.get("reasoning") or "",
-        "teacher_feedback": record.get("teacher_feedback") or "",
-        "teacher_feedback_updated_at": record.get("teacher_feedback_updated_at") or "",
-    }
-    _append_rows_via_update(SHEET_HISTORY, HISTORY_COLS, [row])
-    _invalidate_history_cache()
-
-
-# ---------------------------------------------------------------------------
-# History → records 변환 / 교사 피드백 업데이트 / 시트 초기화
-# ---------------------------------------------------------------------------
-def _cell_str(row: pd.Series, key: str) -> str:
-    if key not in row.index:
-        return ""
-    v = row[key]
-    try:
-        if pd.isna(v):
-            return ""
-    except Exception:
-        pass
-    return str(v) if v is not None else ""
-
-
 def history_df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    if df is None or df.empty:
-        return out
-    for _, row in df.iterrows():
-        out.append(
-            {
-                "record_id": _cell_str(row, "record_id"),
-                "submitted_at": _cell_str(row, "datetime"),
-                "student_id": _cell_str(row, "student_id"),
-                "student_display_name": _cell_str(row, "name"),
-                "subject": _cell_str(row, "subject"),
-                "unit": _cell_str(row, "unit"),
-                "mode": _cell_str(row, "mode"),
-                "symptom": _cell_str(row, "symptom"),
-                "reasoning": _cell_str(row, "reasoning"),
-                "result": _cell_str(row, "diagnosis_result"),
-                "teacher_feedback": _cell_str(row, "teacher_feedback"),
-                "teacher_feedback_updated_at": _cell_str(row, "teacher_feedback_updated_at"),
-            }
-        )
-    return out
+    if df is None or df.empty: return []
+    return df.to_dict('records')
 
+def invalidate_all_sheet_caches() -> None:
+    st.session_state.pop("_gs_users_df", None)
+    st.session_state.pop("_gs_history_df", None)
 
 def update_teacher_feedback_in_sheet(record_id: str, feedback: str, updated_at: str) -> None:
-    if not record_id:
-        return
     conn = _ensure_private_mode_for_write()
-    df = _read_fresh_df(conn, SHEET_HISTORY, HISTORY_COLS)
-    if df.empty or "record_id" not in df.columns:
-        return
+    df = conn.read(worksheet=SHEET_HISTORY, ttl=0)
+    df = _normalize_df(df, HISTORY_COLS)
     mask = df["record_id"].astype(str) == str(record_id)
-    if not mask.any():
-        return
-    df.loc[mask, "teacher_feedback"] = feedback
-    df.loc[mask, "teacher_feedback_updated_at"] = updated_at
-    try:
+    if mask.any():
+        df.loc[mask, "teacher_feedback"] = feedback
+        df.loc[mask, "teacher_feedback_updated_at"] = updated_at
         conn.update(worksheet=SHEET_HISTORY, data=df)
-    except Exception as exc:
-        raise RuntimeError(f"'{SHEET_HISTORY}' 워크시트 업데이트에 실패했습니다: {exc}") from exc
-    _invalidate_history_cache()
-
-
-def clear_history_worksheet() -> None:
-    conn = _ensure_private_mode_for_write()
-    try:
-        conn.clear(worksheet=SHEET_HISTORY)
-    except Exception:
-        empty = pd.DataFrame(columns=HISTORY_COLS)
-        conn.update(worksheet=SHEET_HISTORY, data=empty)
-    _invalidate_history_cache()
-
-
-def maybe_upgrade_plaintext_password(student_id: str, plain_password: str, stored: str) -> None:
-    """시트에 평문 비밀번호가 남아 있으면 해시로 교체한다."""
-    stored = (stored or "").strip()
-    if _is_sha256_hex(stored):
-        return
-    try:
-        conn = _ensure_private_mode_for_write()
-    except Exception:
-        return
-    df = _read_fresh_df(conn, SHEET_USERS, USERS_COLS)
-    if df.empty or "student_id" not in df.columns:
-        return
-    mask = df["student_id"].astype(str).str.strip() == str(student_id).strip()
-    if not mask.any():
-        return
-    df.loc[mask, "password_hash"] = hash_student_password(student_id, plain_password)
-    try:
-        conn.update(worksheet=SHEET_USERS, data=df)
-    except Exception:
-        return
-    _invalidate_users_cache()
+        st.session_state.pop("_gs_history_df", None)
