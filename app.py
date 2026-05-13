@@ -2,6 +2,7 @@ import base64
 import logging
 import re
 import time
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -236,6 +237,7 @@ GEMINI_IMAGE_JPEG_QUALITY = 85
 
 # --- 교사 인증(세션 전용; DB 미연동 시 재시작·새로고침 시 초기화) ---
 TEACHER_PASSWORD_DEFAULT = "0000"
+MISSION_PHOTOS_JSON_MAX_CHARS = 48_000  # Google Sheet 셀 한도(~50k자) 전에 자르기
 
 
 def now_kst_display() -> str:
@@ -299,6 +301,8 @@ def reset_diagnosis_flow() -> None:
     st.session_state.latest_generated_at = ""
     st.session_state.latest_reflection = ""
     st.session_state.latest_image_b64 = ""
+    st.session_state.mission_step_photos = {}
+    st.session_state.diag_photo_nonce = uuid.uuid4().hex[:12]
     for widget_key in (
         "diag_target_part",
         "diag_current_state",
@@ -668,6 +672,86 @@ def thumbnail_b64_to_bytes(b64: str) -> Optional[bytes]:
         logger.warning("썸네일 base64 디코딩 실패: %s", exc)
         return None
 
+
+
+
+def make_step_photo_b64(image_file: Any) -> str:
+    """미션 단계별 인증 사진용 초소형 JPEG base64."""
+    if image_file is None or PILImage is None:
+        return ""
+    try:
+        raw = image_file.getvalue()
+        with PILImage.open(BytesIO(raw)) as im:
+            im.load()
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            im.thumbnail((360, 360), PILImage.LANCZOS)
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=50, optimize=True)
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as exc:
+        logger.warning("미션 단계 사진 썸네일 생성 실패: %s", exc)
+        return ""
+
+
+def parse_mission_step_photos(rec: dict) -> list[dict]:
+    raw = (rec.get("mission_step_photos_json") or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def collect_mission_step_photos_json() -> str:
+    store = st.session_state.get("mission_step_photos") or {}
+    items: list[dict] = []
+    for slot_key in sorted(store.keys()):
+        meta = store.get(slot_key) or {}
+        if not isinstance(meta, dict):
+            continue
+        b64 = (meta.get("b64") or "").strip()
+        if not b64:
+            continue
+        items.append(
+            {
+                "slot": str(slot_key)[:64],
+                "category": str(meta.get("category", ""))[:32],
+                "step": int(meta.get("step") or 0),
+                "title": str(meta.get("title", ""))[:200],
+                "b64": b64,
+            }
+        )
+    if not items:
+        return ""
+    while items:
+        out = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+        if len(out) <= MISSION_PHOTOS_JSON_MAX_CHARS:
+            return out
+        items.pop()
+        logger.warning(
+            "mission_step_photos_json 초과 — 항목을 줄여 %d장만 저장합니다.", len(items)
+        )
+    return ""
+
+
+def render_mission_step_photos_gallery(rec: dict) -> None:
+    photos = parse_mission_step_photos(rec)
+    if not photos:
+        return
+    st.markdown("**📷 미션 단계별 수행 사진**")
+    n = min(3, len(photos))
+    cols = st.columns(n if n > 0 else 1)
+    for i, p in enumerate(photos):
+        title = (p.get("title") or "").strip() or f"단계 {p.get('step') or i + 1}"
+        cat = (p.get("category") or "").strip()
+        cap = f"{cat} · {title}" if cat else title
+        raw = thumbnail_b64_to_bytes((p.get("b64") or "").strip())
+        with cols[i % len(cols)]:
+            if raw:
+                st.image(raw, caption=cap[:80], use_container_width=True)
 
 def _prepare_image_for_gemini(image_file: Any) -> tuple[bytes, str]:
     """Gemini 호출 전 이미지를 안전한 크기로 리사이징한다.
@@ -1151,19 +1235,23 @@ def _render_ncs_badge(ncs_label: str) -> None:
     )
 
 
-def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> None:
+def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, category_id: str = "step") -> None:
     """[단계 1 미션] 진행형 Expander 카드.
 
     각 카드는 학생이 단계 2(실습 수행 결과 제출)를 작성하는 데 직접 도움이 되도록 다음 정보를 포함한다.
       - 🛠 측정/관찰 방법 (어떻게 수행하는가)
       - 📚 NCS 수행준거 (이 단계가 매핑되는 능력단위 요소 — 보라색 배지)
       - 📐 규정값/기준 (타이틀의 굵게 표시 값 — 노란 배지)
+      - 📷 단계 수행 사진 업로드(선택)
       - 📝 기록 예 (단계 2에 그대로 붙여 넣을 한 줄 — st.code 로 복사 가능)
     """
     if not steps:
         if empty_msg:
             st.caption(empty_msg)
         return
+    nonce = str(st.session_state.get("diag_photo_nonce") or "run")
+    st.session_state.setdefault("mission_step_photos", {})
+    photos = st.session_state["mission_step_photos"]
     for idx, item in enumerate(steps):
         # 새 포맷(dict) / 옛 포맷(str) 모두 호환
         if isinstance(item, str):
@@ -1209,12 +1297,33 @@ def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> Non
             if not (method or ncs or record or other_md_lines or bold_values):
                 st.caption("이 단계의 상세 가이드가 비어 있어요. 다음 단계 카드를 펼쳐 진행하세요.")
 
-            st.markdown(
-                '<div style="background:#f0fdf4;border-left:4px solid #22c55e;'
-                'padding:0.5rem 0.8rem;margin-top:0.6rem;border-radius:6px;font-size:0.95rem;">'
-                '✅ 이 단계를 수행했다면 다음 카드를 펼쳐 이동하세요.</div>',
-                unsafe_allow_html=True,
+            slot_key = f"{category_id}_{idx}"
+            st.caption(
+                "📷 이 단계에서 실제로 수행한 모습을 사진으로 남기면 포트폴리오·교사 화면·시트에 함께 저장됩니다."
             )
+            up = st.file_uploader(
+                "단계 수행 사진 (선택)",
+                type=["jpg", "jpeg", "png", "webp"],
+                key=f"mup_{nonce}_{category_id}_{idx}",
+                label_visibility="collapsed",
+            )
+            if up is not None:
+                b64 = make_step_photo_b64(up)
+                if b64:
+                    photos[slot_key] = {
+                        "category": category_id,
+                        "step": idx + 1,
+                        "title": title_clean,
+                        "b64": b64,
+                    }
+            existing = photos.get(slot_key, {}).get("b64", "")
+            if existing:
+                prev = thumbnail_b64_to_bytes(existing)
+                if prev:
+                    st.image(prev, width=220, caption=f"저장 예정 · {title_clean[:40]}")
+            if slot_key in photos and st.button("이 단계 사진 지우기", key=f"mdel_{nonce}_{category_id}_{idx}"):
+                photos.pop(slot_key, None)
+                st.rerun()
 
 
 def _render_eval_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> None:
@@ -1333,6 +1442,7 @@ def render_mission_card(guidance_text: str) -> None:
         _render_step_cards(
             groups["safety"], "🛡️",
             empty_msg="준비/안전 단계가 비어 있어요. 점화 OFF · 절연장갑 등 기본 점검을 먼저 확인하세요.",
+            category_id="safety",
         )
 
     with tab_measure:
@@ -1342,12 +1452,13 @@ def render_mission_card(guidance_text: str) -> None:
                 st.markdown(tools)
         if groups["inspect"]:
             st.markdown("##### 🔍 점검 / 회로도 단계")
-            _render_step_cards(groups["inspect"], "🔍")
+            _render_step_cards(groups["inspect"], "🔍", category_id="inspect")
             st.markdown("")
         st.markdown("##### ⚡ 측정 / 전압 단계")
         _render_step_cards(
             groups["measure"], "⚡",
             empty_msg="측정 단계가 비어 있어요. 멀티미터 모드와 측정 포인트를 먼저 확인하세요.",
+            category_id="measure",
         )
 
     with tab_judge:
@@ -1355,6 +1466,7 @@ def render_mission_card(guidance_text: str) -> None:
         _render_step_cards(
             groups["judge"], "🛠️",
             empty_msg="판정 단계가 비어 있어요. 측정값을 규정값과 비교해 판정해 보세요.",
+            category_id="judge",
         )
         if hint:
             with st.container(border=True):
@@ -1903,8 +2015,21 @@ def build_comprehensive_portfolio_pdf(
         # ⑥ 첨부 사진 (있을 때만)
         image_b64 = (rec.get("image_b64") or "").strip()
         if image_b64:
-            _section_label("📷 첨부 사진")
+            _section_label("📷 1단계 입력 시 첨부 사진")
             _embed_image_from_b64(image_b64)
+
+        mphotos = parse_mission_step_photos(rec)
+        if mphotos:
+            _section_label("📷 미션 단계별 수행 사진")
+            for mp in mphotos:
+                cap = (mp.get("title") or "").strip() or f"단계 {mp.get('step')}"
+                cat = (mp.get("category") or "").strip()
+                if cat:
+                    pdf.set_font_size(10)
+                    pdf.multi_cell(0, 5, f"· [{cat}] {cap}")
+                bb = (mp.get("b64") or "").strip()
+                if bb:
+                    _embed_image_from_b64(bb)
 
         # 교사 피드백 (있을 때만)
         tf = (rec.get("teacher_feedback") or "").strip()
@@ -2294,6 +2419,7 @@ def run_sheet_write_smoke_test() -> dict:
         "reasoning": "(쓰기 테스트)",
         "reflection": "(쓰기 테스트)",
         "image_b64": "",
+        "mission_step_photos_json": "",
     }
     try:
         shb.append_history_from_record(heartbeat_record, 0.0)
@@ -2433,6 +2559,7 @@ def append_diagnostic_record(record: dict) -> None:
                              → split_combined_result 로 가이드/평가를 다시 분리해 사용
       - ``reflection``     : 오늘의 실습 소감
       - ``image_b64``      : 첨부 사진 썸네일(base64 JPEG)
+      - ``mission_step_photos_json`` : 미션 단계별 수행 사진(JSON 배열, base64 JPEG 포함)
 
     저장 결과(성공/실패)는 ``st.session_state["_last_save_status"]`` 에 영구 기록되어
     st.rerun() 후에도 사이드바·메인 화면에서 사용자가 확인할 수 있다.
@@ -2466,6 +2593,7 @@ def append_diagnostic_record(record: dict) -> None:
         len(record.get("reflection") or ""),
         "있음" if (record.get("image_b64") or "").strip() else "없음",
     )
+    logger.info("[APPEND] mission_step_photos_json=%d자", len((record.get("mission_step_photos_json") or "").strip()))
 
     score_input_text = evaluation_text or combined
     ncs = calculate_ncs_scores(
@@ -2678,6 +2806,7 @@ def render_teacher_mode() -> None:
                 if current.get("reasoning"):
                     st.markdown("**실습 수행 결과 / 진단 논리**")
                     st.write(current.get("reasoning"))
+                render_mission_step_photos_gallery(current)
                 st.markdown("**AI 진단 피드백 (가이드+평가, 앞부분)**")
                 preview = (current.get("result") or "")[:2000]
                 st.text(preview + ("…" if len(current.get("result") or "") > 2000 else ""))
@@ -2803,6 +2932,7 @@ def render_student_login() -> None:
             else:
                 sid = raw_sid
                 try:
+                    shb.force_refresh_users()
                     row = shb.get_user_row(sid)
                 except Exception as exc:
                     st.error(f"시트를 읽는 중 오류가 발생했습니다: {exc}")
@@ -2816,14 +2946,13 @@ def render_student_login() -> None:
                     stored_name = normalize_student_name(row.get("name", ""))
                     if stored_name != nm:
                         st.warning(
-                            "입력하신 이름이 이 학번으로 등록된 정보와 다릅니다. "
-                            "본인 학번·이름과 동일하게 입력했는지 확인해 주세요."
+                            "입력하신 이름이 시트에 등록된 이름과 다릅니다. "
+                            "비밀번호 로그인은 계속 진행되며, 표시되는 이름은 시트 기준입니다."
                         )
-                    else:
-                        st.session_state.student_auth_stage = "login"
-                        st.session_state.student_pending_id = sid
-                        st.session_state.student_pending_name = row.get("name") or nm
-                        st.rerun()
+                    st.session_state.student_auth_stage = "login"
+                    st.session_state.student_pending_id = sid
+                    st.session_state.student_pending_name = row.get("name") or nm
+                    st.rerun()
 
     elif stage == "register":
         pid = st.session_state.get("student_pending_id") or ""
@@ -2841,6 +2970,7 @@ def render_student_login() -> None:
                 st.error("비밀번호가 서로 일치하지 않습니다.")
             else:
                 try:
+                    shb.force_refresh_users()
                     if shb.get_user_row(pid) is not None:
                         st.error("이미 등록된 학번입니다. 처음부터 다시 시도해 주세요.")
                     else:
@@ -3052,6 +3182,8 @@ def _render_diagnosis_input_tab(
             st.session_state.latest_image_b64 = (
                 make_thumbnail_b64(uploaded_image) if uploaded_image is not None else ""
             )
+            st.session_state.mission_step_photos = {}
+            st.session_state.diag_photo_nonce = uuid.uuid4().hex[:12]
             st.session_state.diag_step = "guidance"
             st.rerun()
         return
@@ -3178,6 +3310,7 @@ def _render_diagnosis_input_tab(
                 "teacher_feedback_updated_at": "",
                 "reflection": (reflection or "").strip(),
                 "image_b64": st.session_state.get("latest_image_b64", "") or "",
+                "mission_step_photos_json": collect_mission_step_photos_json(),
             }
             # 단계 3 표시용으로 소감을 세션에도 남긴다.
             st.session_state.latest_reflection = (reflection or "").strip()
@@ -3430,8 +3563,10 @@ def _render_portfolio_card(rec: dict) -> None:
         if image_b64:
             img_bytes = thumbnail_b64_to_bytes(image_b64)
             if img_bytes:
-                st.markdown("**📷 첨부 사진**")
+                st.markdown("**📷 1단계 입력 시 첨부 사진**")
                 st.image(img_bytes, width=360)
+
+        render_mission_step_photos_gallery(rec)
 
         # 교사 피드백 (있을 때만)
         tf = (rec.get("teacher_feedback") or "").strip()
@@ -3666,6 +3801,8 @@ def init_session_state() -> None:
         "latest_execution_result": "",
         "latest_reflection": "",
         "latest_image_b64": "",
+        "mission_step_photos": {},
+        "diag_photo_nonce": "",
         # 누적 history 캐시 — 로그인 직후 force_fetch_student_history 로 채워진다.
         # None = 아직 동기화 전, [] = 동기화 완료(0건)
         "my_history_records": None,
