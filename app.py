@@ -1692,6 +1692,7 @@ def calculate_ncs_scores(
     result_text: str,
     mode: str,
     guidance_text: str = "",
+    active_unit: Optional[str] = None,
 ) -> dict:
     """NCS 수행준거 기반 성취도 계산.
 
@@ -1706,16 +1707,34 @@ def calculate_ncs_scores(
     - 둘 다 미포함 → 0점
 
     가이드가 없는 경우(옛 포맷, 단일 단계)는 기존 키워드 매칭 방식을 유지한다.
+
+    ``active_unit``이 ``NCS_UNITS`` 중 하나면 해당 단원만 루브릭 채점을 하고,
+    나머지 단원은 완성도 0으로 둔다(한 회차 수행평가는 선택 단원에만 반영).
+    비어 있거나 목록에 없으면 옛 데이터 호환을 위해 전체 단원을 채점한다.
     """
     weights = MODE_RUBRIC_WEIGHTS.get(mode, {})
     has_guidance = bool(guidance_text and guidance_text.strip())
     result_lower = (result_text or "").lower()
     guidance_lower = (guidance_text or "").lower()
 
+    focus = (active_unit or "").strip()
+    if focus not in NCS_RUBRIC:
+        focus = ""
+
     unit_scores = []
     total_weighted_score = 0.0
     total_weighted_items = 0.0
     for unit in NCS_UNITS:
+        if focus and unit != focus:
+            unit_scores.append(
+                {
+                    "unit": unit,
+                    "completion": 0.0,
+                    "missing_labels": [],
+                }
+            )
+            continue
+
         criteria = NCS_RUBRIC[unit]
         missing_labels: list[str] = []
         unit_weighted_score = 0.0
@@ -1979,6 +1998,7 @@ def build_comprehensive_portfolio_pdf(
                 evaluation_text or rec.get("reasoning") or "",
                 rec.get("mode") or "학습 모드",
                 guidance_text=guidance_text,
+                active_unit=rec.get("unit") or None,
             )
             overall_rate = float(ncs_data.get("overall_rate") or 0.0)
         except Exception:
@@ -2620,6 +2640,7 @@ def append_diagnostic_record(record: dict) -> None:
         score_input_text,
         record.get("mode") or "학습 모드",
         guidance_text=guidance_text,
+        active_unit=record.get("unit") or None,
     )["overall_rate"]
 
     try:
@@ -2666,7 +2687,12 @@ def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], l
             continue
         guidance_text, evaluation_text = split_combined_result(result)
         score_input_text = evaluation_text or result
-        score_data = calculate_ncs_scores(score_input_text, mode, guidance_text=guidance_text)
+        score_data = calculate_ncs_scores(
+            score_input_text,
+            mode,
+            guidance_text=guidance_text,
+            active_unit=rec.get("unit") or None,
+        )
         for us in score_data["unit_scores"]:
             sums[us["unit"]] += us["completion"] * 100.0
             counts[us["unit"]] += 1
@@ -2729,7 +2755,12 @@ def compute_student_unit_radar_values(records: list[dict], student_id: str) -> t
             continue
         guidance_text, evaluation_text = split_combined_result(result)
         score_input_text = evaluation_text or result
-        score_data = calculate_ncs_scores(score_input_text, mode, guidance_text=guidance_text)
+        score_data = calculate_ncs_scores(
+            score_input_text,
+            mode,
+            guidance_text=guidance_text,
+            active_unit=rec.get("unit") or None,
+        )
         for us in score_data["unit_scores"]:
             u = us["unit"]
             if u in sums:
@@ -3663,6 +3694,7 @@ def _compute_record_achievement(rec: dict) -> tuple[float, list[dict]]:
             score_input_text,
             rec.get("mode") or "학습 모드",
             guidance_text=guidance_text,
+            active_unit=rec.get("unit") or None,
         )
     except Exception:
         return 0.0, []

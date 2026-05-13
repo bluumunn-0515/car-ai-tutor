@@ -1,0 +1,32 @@
+﻿python : Traceback (most recent call last):
+위치 C:\Users\user\AppData\Local\Temp\ps-script-f75d9762-47e7-49ee-aa2b-feb3760bbf62.ps1:82 문자:1
++ python -c "from pathlib import Path; L=Path(r'c:/Users/user/Documents ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 3, in <module>
+    for i in range(start, start+80): print(f'{i+1}|{L[i]}')
+                                     ~~~~~^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'cp949' codec can't encode character '\U0001f4d8' in position 43: illegal multibyte sequence
+2205|
+2206|def render_ncs_achievement(
+2207|    result_text: str,
+2208|    mode: str,
+2209|    guidance_text: str = "",
+2210|    unit_name: str = "",
+2211|) -> None:
+2212|    """오늘 수행한 단일 단원에 집중한 성취도 화면.
+2213|
+2214|    기존의 '모든 단원 평균 + 레이더 차트' UI 대신, 학생이 방금 끝낸 단원의
+2215|    4가지 세부 수행준거를 개별 progress 카드로 큼직하게 노출한다.
+2216|    """
+2217|    if not result_text or not result_text.strip():
+2218|        st.caption("아직 분석할 결과가 없습니다. 먼저 [단계 2] 실습 수행 결과를 제출해 주세요.")
+2219|        return
+2220|
+2221|    unit_name = (unit_name or st.session_state.get("latest_unit") or "").strip()
+2222|    if not unit_name or unit_name not in NCS_RUBRIC:
+2223|        st.warning("최근 수행한 단원 정보를 찾을 수 없어 분석할 수 없습니다.")
+2224|        return
+2225|
