@@ -1235,7 +1235,7 @@ def _render_ncs_badge(ncs_label: str) -> None:
     )
 
 
-def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, category_id: str = "step") -> None:
+def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, category_id: str = "step", enable_step_photos: bool = True) -> None:
     """[단계 1 미션] 진행형 Expander 카드.
 
     각 카드는 학생이 단계 2(실습 수행 결과 제출)를 작성하는 데 직접 도움이 되도록 다음 정보를 포함한다.
@@ -1249,9 +1249,13 @@ def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, cat
         if empty_msg:
             st.caption(empty_msg)
         return
-    nonce = str(st.session_state.get("diag_photo_nonce") or "run")
-    st.session_state.setdefault("mission_step_photos", {})
-    photos = st.session_state["mission_step_photos"]
+    if enable_step_photos:
+        nonce = str(st.session_state.get("diag_photo_nonce") or "run")
+        st.session_state.setdefault("mission_step_photos", {})
+        photos = st.session_state["mission_step_photos"]
+    else:
+        nonce = ""
+        photos = {}
     for idx, item in enumerate(steps):
         # 새 포맷(dict) / 옛 포맷(str) 모두 호환
         if isinstance(item, str):
@@ -1297,33 +1301,36 @@ def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, cat
             if not (method or ncs or record or other_md_lines or bold_values):
                 st.caption("이 단계의 상세 가이드가 비어 있어요. 다음 단계 카드를 펼쳐 진행하세요.")
 
-            slot_key = f"{category_id}_{idx}"
-            st.caption(
-                "📷 이 단계에서 실제로 수행한 모습을 사진으로 남기면 포트폴리오·교사 화면·시트에 함께 저장됩니다."
-            )
-            up = st.file_uploader(
-                "단계 수행 사진 (선택)",
-                type=["jpg", "jpeg", "png", "webp"],
-                key=f"mup_{nonce}_{category_id}_{idx}",
-                label_visibility="collapsed",
-            )
-            if up is not None:
-                b64 = make_step_photo_b64(up)
-                if b64:
-                    photos[slot_key] = {
-                        "category": category_id,
-                        "step": idx + 1,
-                        "title": title_clean,
-                        "b64": b64,
-                    }
-            existing = photos.get(slot_key, {}).get("b64", "")
-            if existing:
-                prev = thumbnail_b64_to_bytes(existing)
-                if prev:
-                    st.image(prev, width=220, caption=f"저장 예정 · {title_clean[:40]}")
-            if slot_key in photos and st.button("이 단계 사진 지우기", key=f"mdel_{nonce}_{category_id}_{idx}"):
-                photos.pop(slot_key, None)
-                st.rerun()
+            if enable_step_photos:
+                slot_key = f"{category_id}_{idx}"
+                st.caption(
+                    "📷 이 단계에서 실제로 수행한 모습을 사진으로 남기면 포트폴리오·교사 화면·시트에 함께 저장됩니다."
+                )
+                up = st.file_uploader(
+                    "단계 수행 사진 (선택)",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=f"mup_{nonce}_{category_id}_{idx}",
+                    label_visibility="collapsed",
+                )
+                if up is not None:
+                    b64 = make_step_photo_b64(up)
+                    if b64:
+                        photos[slot_key] = {
+                            "category": category_id,
+                            "step": idx + 1,
+                            "title": title_clean,
+                            "b64": b64,
+                        }
+                existing = photos.get(slot_key, {}).get("b64", "")
+                if existing:
+                    prev = thumbnail_b64_to_bytes(existing)
+                    if prev:
+                        st.image(prev, width=220, caption=f"저장 예정 · {title_clean[:40]}")
+                if slot_key in photos and st.button("이 단계 사진 지우기", key=f"mdel_{nonce}_{category_id}_{idx}"):
+                    photos.pop(slot_key, None)
+                    st.rerun()
+            else:
+                st.caption("📷 단계별 인증 사진은 **[📝 실습 수행]** 탭의 미션 카드에서만 등록할 수 있습니다.")
 
 
 def _render_eval_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> None:
@@ -1381,7 +1388,7 @@ def _render_eval_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -
                 st.caption("이 단계의 상세 평가가 비어 있어요.")
 
 
-def render_mission_card(guidance_text: str) -> None:
+def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) -> None:
     """[단계 1] AI 미션 카드 — 3 tabs(준비/안전 · 측정 미션 · 고장 판정) + 진행형 Expander.
 
     레거시(H2만 있고 H3 4카테고리가 없는) 가이드는 원문 마크다운으로 폴백한다.
@@ -1443,6 +1450,7 @@ def render_mission_card(guidance_text: str) -> None:
             groups["safety"], "🛡️",
             empty_msg="준비/안전 단계가 비어 있어요. 점화 OFF · 절연장갑 등 기본 점검을 먼저 확인하세요.",
             category_id="safety",
+            enable_step_photos=enable_step_photos,
         )
 
     with tab_measure:
@@ -1452,13 +1460,14 @@ def render_mission_card(guidance_text: str) -> None:
                 st.markdown(tools)
         if groups["inspect"]:
             st.markdown("##### 🔍 점검 / 회로도 단계")
-            _render_step_cards(groups["inspect"], "🔍", category_id="inspect")
+            _render_step_cards(groups["inspect"], "🔍", category_id="inspect", enable_step_photos=enable_step_photos)
             st.markdown("")
         st.markdown("##### ⚡ 측정 / 전압 단계")
         _render_step_cards(
             groups["measure"], "⚡",
             empty_msg="측정 단계가 비어 있어요. 멀티미터 모드와 측정 포인트를 먼저 확인하세요.",
             category_id="measure",
+            enable_step_photos=enable_step_photos,
         )
 
     with tab_judge:
@@ -1467,6 +1476,7 @@ def render_mission_card(guidance_text: str) -> None:
             groups["judge"], "🛠️",
             empty_msg="판정 단계가 비어 있어요. 측정값을 규정값과 비교해 판정해 보세요.",
             category_id="judge",
+            enable_step_photos=enable_step_photos,
         )
         if hint:
             with st.container(border=True):
@@ -1649,7 +1659,7 @@ def render_feedback_cards(result_text: str, mode: str) -> None:
         return
     guidance_text, evaluation_text = split_combined_result(result_text)
     if guidance_text:
-        render_mission_card(guidance_text)
+        render_mission_card(guidance_text, enable_step_photos=False)
     if evaluation_text:
         render_evaluation_card(evaluation_text)
     if not guidance_text and not evaluation_text:
@@ -3391,7 +3401,7 @@ def _render_diagnosis_feedback_tab() -> None:
     )
     if guidance_text:
         render_photo_retake_notice(guidance_text)
-        render_mission_card(guidance_text)
+        render_mission_card(guidance_text, enable_step_photos=False)
     if diag_step == "guidance" and not evaluation_text:
         st.info("📌 [단계 2] 실습 수행 결과를 [📝 실습 수행] 탭에서 제출하면 평가 카드가 이 아래에 추가됩니다.")
     if evaluation_text:
