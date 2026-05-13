@@ -1864,6 +1864,8 @@ def build_comprehensive_portfolio_pdf(
         out = s
         for k, v in replacements.items():
             out = out.replace(k, v)
+        # Malgun 등 TTF 에 글리프가 없는 서로게이트 평면 문자 제거(남은 이모지 등)
+        out = "".join(ch for ch in out if ord(ch) < 0x10000)
         return out
 
     def _section_label(label: str) -> None:
@@ -1872,16 +1874,19 @@ def build_comprehensive_portfolio_pdf(
         ``cell()`` 은 한 줄 너비 초과 시 'Not enough horizontal space' 를 던질 수 있어
         반드시 ``multi_cell()`` 로 자동 줄바꿈을 보장한다.
         """
+        pdf.set_x(pdf.l_margin)
         _set_font(12, bold=True)
         pdf.set_fill_color(241, 245, 249)  # slate-100
         pdf.set_text_color(15, 23, 42)      # slate-900
         pdf.multi_cell(0, 8, _safe_text(label), fill=True)
         pdf.set_text_color(0, 0, 0)
+        pdf.set_x(pdf.l_margin)
         pdf.ln(1)
 
     def _write_block(label: str, body: str, *, allow_empty_caption: bool = True) -> None:
         body_text = _safe_text((body or "").strip())
         _section_label(label)
+        pdf.set_x(pdf.l_margin)
         _set_font(11)
         if body_text:
             # 폭 0 = 우측 마진까지 사용 → 페이지 너비에 맞춰 자동 줄바꿈
@@ -1890,6 +1895,7 @@ def build_comprehensive_portfolio_pdf(
             pdf.set_text_color(120, 120, 120)
             pdf.multi_cell(0, 8, "(내용 없음)")
             pdf.set_text_color(0, 0, 0)
+        pdf.set_x(pdf.l_margin)
         pdf.ln(2)
 
     def _draw_divider() -> None:
@@ -1907,21 +1913,23 @@ def build_comprehensive_portfolio_pdf(
     def _embed_image_from_b64(b64: str) -> None:
         """썸네일 base64 를 PDF 에 이미지로 임베딩한다 (페이지 폭 안전).
 
-        - 이미지 폭을 사용 가능한 콘텐츠 폭(좌·우 마진 제외) 의 70% 로 제한.
-        - 이미지 높이가 남은 페이지보다 크면 자동으로 다음 페이지로 넘어가도록
-          ``pdf.set_auto_page_break(True)`` 가 이미 켜져 있음을 신뢰한다.
+        - fpdf2 는 image() 후 커서 x 가 이미지 오른쪽에 머물 수 있어, 다음 multi_cell(0)의
+          '사용 가능 폭'이 0에 가까워지며 Not enough horizontal space 오류가 난다.
+        - 항상 왼쪽 여백에서 그린 뒤 x 를 l_margin 으로 되돌린다.
         """
         img_bytes = thumbnail_b64_to_bytes(b64)
         if not img_bytes or PILImage is None:
             return
         try:
+            pdf.set_x(pdf.l_margin)
             with PILImage.open(BytesIO(img_bytes)) as im:
                 im.load()
                 if im.mode != "RGB":
                     im = im.convert("RGB")
                 content_w = pdf.w - pdf.l_margin - pdf.r_margin
-                target_w = min(80.0, content_w * 0.7)
-                pdf.image(im, w=target_w)
+                target_w = min(90.0, max(24.0, content_w * 0.72))
+                pdf.image(im, x=pdf.l_margin, w=target_w)
+            pdf.set_x(pdf.l_margin)
             pdf.ln(2)
         except Exception as exc:
             logger.warning("PDF 이미지 임베딩 실패: %s", exc)
@@ -1991,6 +1999,7 @@ def build_comprehensive_portfolio_pdf(
         pdf.multi_cell(0, 8, _safe_text(f"학습 모드: {rec.get('mode') or '학습 모드'}"))
         pdf.multi_cell(0, 8, _safe_text(f"NCS 성취도(이 회차): {overall_rate:.0f} / 100"))
         pdf.ln(2)
+        pdf.set_x(pdf.l_margin)
 
         # ① 수행 내용 — 학생 입력
         _write_block("🔍 수행 내용 (대상 / 상태 / 학습 질문)", rec.get("symptom") or "")
@@ -2034,9 +2043,10 @@ def build_comprehensive_portfolio_pdf(
             for mp in mphotos:
                 cap = (mp.get("title") or "").strip() or f"단계 {mp.get('step')}"
                 cat = (mp.get("category") or "").strip()
+                pdf.set_x(pdf.l_margin)
                 if cat:
-                    pdf.set_font_size(10)
-                    pdf.multi_cell(0, 5, f"· [{cat}] {cap}")
+                    _set_font(10)
+                    pdf.multi_cell(0, 6, _safe_text(f"· [{cat}] {cap}"))
                 bb = (mp.get("b64") or "").strip()
                 if bb:
                     _embed_image_from_b64(bb)
