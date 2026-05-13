@@ -2786,8 +2786,73 @@ def _student_unit_attempt_counts(records: list[dict], student_id: str) -> dict[s
     return cnt
 
 
-def _build_teacher_ai_evaluation_digest(student_records: list[dict], max_sessions: int = 3) -> str:
-    """최근 실습의 evaluation_text에서 교사 참고용 발췌."""
+def _squish_teacher_display_text(text: str, max_chars: int = 240) -> str:
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if len(raw) <= max_chars:
+        return raw
+    return raw[: max_chars - 1].rstrip() + "…"
+
+
+def _symptom_bullets_for_teacher(symptom: str) -> list[str]:
+    raw = (symptom or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    for title, key in (
+        ("대상", "대상 부품"),
+        ("상태", "현재 상태"),
+        ("질문", "학습 질문"),
+    ):
+        m = re.search(rf"\[{re.escape(key)}\]\s*([^\n]+)", raw)
+        if m:
+            val = m.group(1).strip()
+            if val and val != "(미입력)":
+                out.append(f"**{title}** · {_squish_teacher_display_text(val, 180)}")
+    if out:
+        return out
+    return [_squish_teacher_display_text(raw, 320)]
+
+
+def _ai_evaluation_teacher_bullets(
+    evaluation_text: str, max_items: int = 5, max_each: int = 130
+) -> list[str]:
+    body = (evaluation_text or "").strip()
+    if not body:
+        return []
+    bullets: list[str] = []
+    m = re.search(r"한줄\s*요약[：:]\s*\*?\*?(.+?)\*?\*?(?:\n|$)", body)
+    if m:
+        bullets.append(_squish_teacher_display_text(m.group(1), max_each))
+    in_cat = False
+    for line in body.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if "카테고리 요약" in s or "🏷" in s:
+            in_cat = True
+            continue
+        if in_cat and (s.startswith("•") or s.startswith("-")):
+            piece = s.lstrip("•-").strip()
+            if piece and piece not in bullets:
+                bullets.append(_squish_teacher_display_text(piece, max_each))
+        if len(bullets) >= max_items:
+            break
+    if not bullets:
+        flat = re.sub(r"^#+\s*.+$", "", body, flags=re.MULTILINE)
+        flat = _squish_teacher_display_text(flat, max_each * max_items)
+        if flat:
+            bullets.append(flat)
+    dedup: list[str] = []
+    for b in bullets:
+        if b not in dedup:
+            dedup.append(b)
+    return dedup[:max_items]
+
+
+def _build_teacher_ai_digest_rows(
+    student_records: list[dict], max_sessions: int = 3
+) -> list[dict[str, str]]:
+    """최근 회차별 AI 평가를 교사용 짧은 카드 row로 변환."""
 
     def _sort_ts(r: dict) -> str:
         return str(r.get("submitted_at") or "")
@@ -2797,39 +2862,76 @@ def _build_teacher_ai_evaluation_digest(student_records: list[dict], max_session
         key=_sort_ts,
         reverse=True,
     )[:max_sessions]
-    chunks: list[str] = []
-    markers_priority = (
-        "4축 분석",
-        "NCS 기반 4축",
-        "보완이 필요한 요소",
-        "보완이 필요한",
-        "다음 학습 미션",
-        "📋 NCS 기반",
-    )
-    for i, rec in enumerate(recs, 1):
+    rows: list[dict[str, str]] = []
+    for rec in recs:
         _, evaluation_text = split_combined_result(rec.get("result") or "")
-        body = (evaluation_text or "").strip()
-        if not body:
+        bl = _ai_evaluation_teacher_bullets(evaluation_text, max_items=3, max_each=150)
+        if not bl:
             continue
-        snippet = body[:450]
-        hit_marker = ""
-        for marker in markers_priority:
-            idx = body.find(marker)
-            if idx != -1:
-                snippet = body[idx : idx + 520]
-                hit_marker = marker
-                break
-        meta = f"실습 {i} · {rec.get('submitted_at') or '-'} · {rec.get('unit') or '-'}"
-        if hit_marker:
-            msg = f"**{meta}**\n\n*{hit_marker}* 관련 발췌:\n\n{snippet.strip()}"
-            chunks.append(msg)
-        else:
-            chunks.append(f"**{meta}**\n\n{snippet.strip()}")
-    if not chunks:
-        return (
-            "AI 평가 텍스트가 비어 있거나, 최근 기록에서 요약할 평가 블록을 찾지 못했습니다."
+        ts = rec.get("submitted_at") or "-"
+        unit = rec.get("unit") or "-"
+        rows.append(
+            {
+                "meta": f"{ts} · {unit}",
+                "summary": bl[0],
+                "extra": " · ".join(bl[1:]),
+            }
         )
-    return "\n\n---\n\n".join(chunks)
+    return rows
+
+
+def _render_teacher_submission_preview(current: dict) -> None:
+    """교사용: 학생 입력·AI 평가를 압축 요약 + 원문은 접기."""
+    st.markdown(
+        f"**{current.get('student_display_name') or '-'}** (`{current.get('student_id') or '-'}`) · "
+        f"{current.get('submitted_at') or '-'} · **{current.get('unit') or '-'}**"
+    )
+    st.markdown("##### 학생 입력 요약")
+    sb = _symptom_bullets_for_teacher(current.get("symptom") or "")
+    if sb:
+        for line in sb:
+            st.markdown(f"- {line}")
+    else:
+        st.caption("구조화된 증상 입력이 없습니다.")
+    reasoning = (current.get("reasoning") or "").strip()
+    if reasoning:
+        st.markdown("##### 수행 결과 (압축)")
+        st.markdown(f"> {_squish_teacher_display_text(reasoning, 360)}")
+    refl = (current.get("reflection") or "").strip()
+    if refl:
+        st.caption(f"소감: {_squish_teacher_display_text(refl, 200)}")
+    _, e_text = split_combined_result(current.get("result") or "")
+    st.markdown("##### AI 평가 · 교사용 요약")
+    ev_b = _ai_evaluation_teacher_bullets(e_text, max_items=6, max_each=120)
+    if ev_b:
+        for b in ev_b:
+            st.markdown(f"- {b}")
+    else:
+        st.caption("AI 평가 문단을 요약할 수 없습니다.")
+    render_mission_step_photos_gallery(current)
+    with st.expander("원문 전체 보기 (학생 입력·AI 리포트)", expanded=False):
+        st.text_area(
+            "원문 증상·질문",
+            value=(current.get("symptom") or "(없음)")[:8000],
+            height=120,
+            disabled=True,
+            key=f"teacher_prev_sym_{current.get('record_id', '')}",
+        )
+        if reasoning:
+            st.text_area(
+                "원문 수행 결과",
+                value=reasoning[:8000],
+                height=120,
+                disabled=True,
+                key=f"teacher_prev_reas_{current.get('record_id', '')}",
+            )
+        st.text_area(
+            "AI 리포트 전체",
+            value=(current.get("result") or "")[:12000],
+            height=220,
+            disabled=True,
+            key=f"teacher_prev_res_{current.get('record_id', '')}",
+        )
 
 
 def render_teacher_login() -> None:
@@ -2980,8 +3082,18 @@ def render_teacher_mode() -> None:
                 st.plotly_chart(fig_s, use_container_width=True)
 
         st.subheader("🤖 AI 튜터의 학생 종합 평가 코멘트")
-        digest_md = _build_teacher_ai_evaluation_digest(stud_recs_for_fb, max_sessions=3)
-        st.info(digest_md)
+        digest_rows = _build_teacher_ai_digest_rows(stud_recs_for_fb, max_sessions=3)
+        if not digest_rows:
+            st.caption(
+                "최근 AI 평가 문단이 없거나 요약할 수 없습니다. 아래 제출물의 'AI 평가 · 교사용 요약'을 참고하세요."
+            )
+        else:
+            for dr in digest_rows:
+                with st.container(border=True):
+                    st.caption(dr["meta"])
+                    st.markdown(f"**핵심** — {dr['summary']}")
+                    if (dr.get("extra") or "").strip():
+                        st.caption(dr["extra"])
 
     st.subheader("과제 관리 — 진단 리포트별 상세 피드백 (초안)")
     if not records or not stud_recs_for_fb:
@@ -3014,18 +3126,7 @@ def render_teacher_mode() -> None:
         current = rec_by_id.get(picked_id) if picked_id else None
         if current:
             with st.expander("선택한 제출의 요약 / 리포트 미리보기", expanded=True):
-                st.markdown(f"**학생:** {current.get('student_display_name')} (`{current.get('student_id')}`)")
-                st.markdown(f"**교과·단원:** {current.get('subject')} → {current.get('unit')}")
-                st.markdown(f"**모드:** {current.get('mode')}")
-                st.markdown("**입력 증상**")
-                st.write(current.get("symptom") or "(없음)")
-                if current.get("reasoning"):
-                    st.markdown("**실습 수행 결과 / 진단 논리**")
-                    st.write(current.get("reasoning"))
-                render_mission_step_photos_gallery(current)
-                st.markdown("**AI 진단 피드백 (가이드+평가, 앞부분)**")
-                preview = (current.get("result") or "")[:2000]
-                st.text(preview + ("…" if len(current.get("result") or "") > 2000 else ""))
+                _render_teacher_submission_preview(current)
             fb_key = f"teacher_fb_draft_{current['record_id']}"
             if fb_key not in st.session_state:
                 st.session_state[fb_key] = current.get("teacher_feedback") or ""
