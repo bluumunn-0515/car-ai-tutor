@@ -2681,6 +2681,125 @@ def compute_class_average_unit_scores(records: list[dict]) -> tuple[list[str], l
         radar_values.append(round(sums[unit] / c, 1))
     return radar_labels, radar_values
 
+def _teacher_real_submission(rec: dict) -> bool:
+    """교사 대시보드 분석·피드백용: 시트 진단/더미 행 제외."""
+    if _normalize_sid(rec.get("student_id")) == "__diag__":
+        return False
+    if (rec.get("mode") or "").strip().lower() == "diagnostic":
+        return False
+    return True
+
+
+def _ncs_unit_short_label(unit: str) -> str:
+    u = str(unit or "")
+    return u.replace("자동차 ", "").replace(" 점검", "").replace(" 고장진단", "")
+
+
+def _unique_student_options(records: list[dict]) -> list[tuple[str, str, str]]:
+    """(student_id, select_label, display_name) 리스트, 학번 정렬."""
+    best_name: dict[str, str] = {}
+    for rec in records:
+        if not _teacher_real_submission(rec):
+            continue
+        sid = _normalize_sid(rec.get("student_id"))
+        if not sid:
+            continue
+        nm = (rec.get("student_display_name") or "").strip() or sid
+        best_name[sid] = nm
+    out: list[tuple[str, str, str]] = []
+    for sid in sorted(best_name.keys()):
+        nm = best_name[sid]
+        out.append((sid, f"{sid} {nm}", nm))
+    return out
+
+
+def compute_student_unit_radar_values(records: list[dict], student_id: str) -> tuple[list[str], list[float]]:
+    """선택 학생만: 루브릭 기반 6개 단원 평균 성취도(%). 미수행 단원 0%."""
+    sid = _normalize_sid(student_id)
+    sums = {u: 0.0 for u in NCS_UNITS}
+    counts = {u: 0 for u in NCS_UNITS}
+    for rec in records:
+        if _normalize_sid(rec.get("student_id")) != sid:
+            continue
+        if not _teacher_real_submission(rec):
+            continue
+        result = rec.get("result") or ""
+        mode = rec.get("mode") or "학습 모드"
+        if not str(result).strip():
+            continue
+        guidance_text, evaluation_text = split_combined_result(result)
+        score_input_text = evaluation_text or result
+        score_data = calculate_ncs_scores(score_input_text, mode, guidance_text=guidance_text)
+        for us in score_data["unit_scores"]:
+            u = us["unit"]
+            if u in sums:
+                sums[u] += float(us["completion"]) * 100.0
+                counts[u] += 1
+    labels = [_ncs_unit_short_label(u) for u in NCS_UNITS]
+    values = [round(sums[u] / counts[u], 1) if counts[u] else 0.0 for u in NCS_UNITS]
+    return labels, values
+
+
+def _student_unit_attempt_counts(records: list[dict], student_id: str) -> dict[str, int]:
+    """실제 제출된 단원별 학생 실습 완료 횟수."""
+    sid = _normalize_sid(student_id)
+    cnt = {u: 0 for u in NCS_UNITS}
+    for rec in records:
+        if _normalize_sid(rec.get("student_id")) != sid:
+            continue
+        if not _teacher_real_submission(rec):
+            continue
+        u = (rec.get("unit") or "").strip()
+        if u in cnt:
+            cnt[u] += 1
+    return cnt
+
+
+def _build_teacher_ai_evaluation_digest(student_records: list[dict], max_sessions: int = 3) -> str:
+    """최근 실습의 evaluation_text에서 교사 참고용 발췌."""
+
+    def _sort_ts(r: dict) -> str:
+        return str(r.get("submitted_at") or "")
+
+    recs = sorted(
+        [r for r in student_records if _teacher_real_submission(r)],
+        key=_sort_ts,
+        reverse=True,
+    )[:max_sessions]
+    chunks: list[str] = []
+    markers_priority = (
+        "4축 분석",
+        "NCS 기반 4축",
+        "보완이 필요한 요소",
+        "보완이 필요한",
+        "다음 학습 미션",
+        "📋 NCS 기반",
+    )
+    for i, rec in enumerate(recs, 1):
+        _, evaluation_text = split_combined_result(rec.get("result") or "")
+        body = (evaluation_text or "").strip()
+        if not body:
+            continue
+        snippet = body[:450]
+        hit_marker = ""
+        for marker in markers_priority:
+            idx = body.find(marker)
+            if idx != -1:
+                snippet = body[idx : idx + 520]
+                hit_marker = marker
+                break
+        meta = f"실습 {i} · {rec.get('submitted_at') or '-'} · {rec.get('unit') or '-'}"
+        if hit_marker:
+            msg = f"**{meta}**\n\n*{hit_marker}* 관련 발췌:\n\n{snippet.strip()}"
+            chunks.append(msg)
+        else:
+            chunks.append(f"**{meta}**\n\n{snippet.strip()}")
+    if not chunks:
+        return (
+            "AI 평가 텍스트가 비어 있거나, 최근 기록에서 요약할 평가 블록을 찾지 못했습니다."
+        )
+    return "\n\n---\n\n".join(chunks)
+
 
 def render_teacher_login() -> None:
     """교사 모드 선택 직후: 성함·비밀번호 검증 후 대시보드 진입."""
@@ -2750,13 +2869,14 @@ def render_teacher_mode() -> None:
         if st.button("시트 새로고침", help="캐시를 비우고 history를 다시 읽습니다.", key="teacher_gs_refresh"):
             shb.invalidate_all_sheet_caches()
             st.rerun()
-    records = get_diagnostic_records()
+    records_raw = get_diagnostic_records()
+    records = [r for r in records_raw if _teacher_real_submission(r)]
     st.subheader("학생 실황 — 진단 제출 현황")
-    if not records:
+    if not records_raw:
         st.info("아직 제출된 진단 기록이 없습니다. 학생 모드에서 진단을 실행하면 여기에 표시됩니다.")
     else:
         rows = []
-        for rec in reversed(records):
+        for rec in reversed(records_raw):
             rows.append(
                 {
                     "진단 일시": rec.get("submitted_at") or "-",
@@ -2769,41 +2889,81 @@ def render_teacher_mode() -> None:
                 }
             )
         st.dataframe(rows, use_container_width=True, hide_index=True)
-    st.subheader("성취도 분석 — 전체 학생 NCS 능력단위 평균")
-    labels, values = compute_class_average_unit_scores(records)
-    if not labels or go is None:
-        if not records:
-            st.caption("데이터가 쌓이면 학급 평균 레이더 차트가 표시됩니다.")
-        elif go is None:
-            st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
-        else:
-            st.caption("유효한 AI 결과가 있는 기록이 없어 평균을 계산할 수 없습니다.")
-    else:
-        labels_closed = labels + [labels[0]]
-        values_closed = values + [values[0]]
-        fig = go.Figure(
-            data=[
-                go.Scatterpolar(
-                    r=values_closed,
-                    theta=labels_closed,
-                    fill="toself",
-                    name="학급 평균 성취율(%)",
-                )
-            ]
-        )
-        fig.update_layout(
-            polar={"radialaxis": {"visible": True, "range": [0, 100]}},
-            showlegend=False,
-            margin={"l": 30, "r": 30, "t": 40, "b": 30},
-            title="전체 학생 NCS 능력단위별 평균 점수 (루브릭 기반 추정)",
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    st.subheader("과제 관리 — 진단 리포트별 상세 피드백 (초안)")
+
+    st.markdown("---")
+    st.subheader("👩‍🎓 학생별 성취도 및 진도 분석")
+    sel_sid = None
+    stud_recs_for_fb: list[dict] = []
     if not records:
-        st.caption("피드백을 남길 제출물이 없습니다.")
+        st.caption("실습 제출이 있는 학생을 선택하면 개인별 진도·성취도를 확인할 수 있습니다.")
+    else:
+        stud_opts = _unique_student_options(records)
+        labels_for_box = [t[1] for t in stud_opts]
+        sid_by_label = {t[1]: t[0] for t in stud_opts}
+        pick = st.selectbox(
+            "분석할 학생 선택",
+            labels_for_box,
+            key="teacher_student_analysis_pick",
+            help="학번·이름 기준으로 선택합니다. 아래 차트·AI 요약·피드백 목록이 이 학생에 맞춰집니다.",
+        )
+        sel_sid = sid_by_label.get(pick)
+        stud_recs_for_fb = [
+            r for r in records if _normalize_sid(r.get("student_id")) == _normalize_sid(sel_sid)
+        ] if sel_sid else []
+
+        col_prog, col_radar = st.columns([1, 1])
+        with col_prog:
+            st.markdown("##### 📋 단원별 진도 (실습 제출 횟수)")
+            attempts = _student_unit_attempt_counts(records, str(sel_sid))
+            for u in NCS_UNITS:
+                n = attempts.get(u, 0)
+                if n > 0:
+                    st.markdown(f"✅ **{u}** ({n}회)")
+                else:
+                    st.markdown(f"⬜ **{u}** (미수행)")
+        with col_radar:
+            st.markdown("##### 📊 능력단위별 성취도 (루브릭 추정 %)")
+            if go is None:
+                st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
+            else:
+                r_labels, r_vals = compute_student_unit_radar_values(records, str(sel_sid))
+                r_lbl_closed = r_labels + [r_labels[0]]
+                r_val_closed = r_vals + [r_vals[0]]
+                fig_s = go.Figure(
+                    data=[
+                        go.Scatterpolar(
+                            r=r_val_closed,
+                            theta=r_lbl_closed,
+                            fill="toself",
+                            name="선택 학생 성취도(%)",
+                        )
+                    ]
+                )
+                pick_nm = next((t[2] for t in stud_opts if t[0] == sel_sid), "")
+                fig_s.update_layout(
+                    polar={"radialaxis": {"visible": True, "range": [0, 100]}},
+                    showlegend=False,
+                    margin={"l": 30, "r": 30, "t": 40, "b": 30},
+                    title=f"{sel_sid} {pick_nm} — NCS 능력단위 평균 (미수행 0%)",
+                )
+                st.plotly_chart(fig_s, use_container_width=True)
+
+        st.subheader("🤖 AI 튜터의 학생 종합 평가 코멘트")
+        digest_md = _build_teacher_ai_evaluation_digest(stud_recs_for_fb, max_sessions=3)
+        st.info(digest_md)
+
+    st.subheader("과제 관리 — 진단 리포트별 상세 피드백 (초안)")
+    if not records or not stud_recs_for_fb:
+        st.caption(
+            "피드백을 남길 제출물이 없습니다. 위에서 학생을 선택했는지 확인해 주세요."
+            if records and not stud_recs_for_fb
+            else "피드백을 남길 제출물이 없습니다."
+        )
+        current = None
+        picked_id = None
     else:
         options: list[tuple[str, str]] = []
-        for rec in reversed(records):
+        for rec in reversed(stud_recs_for_fb):
             sid = rec.get("student_id", "")
             ts = rec.get("submitted_at", "")
             unit = rec.get("unit", "")
@@ -2812,9 +2972,14 @@ def render_teacher_mode() -> None:
             options.append((label, rec["record_id"]))
         labels_only = [o[0] for o in options]
         id_by_label = dict(options)
-        picked_label = st.selectbox("피드백할 제출 선택", labels_only, index=0)
+        picked_label = st.selectbox(
+            "피드백할 제출 선택 (선택한 학생만)",
+            labels_only,
+            index=0,
+            key="teacher_fb_pick_filtered",
+        )
         picked_id = id_by_label.get(picked_label)
-        rec_by_id = {r["record_id"]: r for r in records}
+        rec_by_id = {r["record_id"]: r for r in stud_recs_for_fb}
         current = rec_by_id.get(picked_id) if picked_id else None
         if current:
             with st.expander("선택한 제출의 요약 / 리포트 미리보기", expanded=True):
@@ -2839,7 +3004,7 @@ def render_teacher_mode() -> None:
                 height=200,
                 placeholder="예: 측정 포인트 선택은 좋았으나, 접지 경로를 먼저 확인하는 절차를 추가해 보세요.",
             )
-            if st.button("피드백 저장", type="primary"):
+            if st.button("피드백 저장", type="primary", key="teacher_fb_save_btn"):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 try:
                     shb.update_teacher_feedback_in_sheet(
@@ -2870,7 +3035,7 @@ def render_teacher_mode() -> None:
         "※ DB 미연결: 새로고침·서버 재시작 시 비밀번호는 0000으로 초기화될 수 있습니다."
     )
     st.markdown("---")
-    if records and st.button("모든 진단 기록 초기화 (데모용)"):
+    if records_raw and st.button("모든 진단 기록 초기화 (데모용)", key="teacher_clear_history_demo"):
         try:
             shb.clear_history_worksheet()
             st.success("history 시트를 비웠습니다.")
