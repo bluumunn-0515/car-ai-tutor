@@ -4055,33 +4055,50 @@ def render_student_mode() -> None:
         _render_portfolio_view()
         return
 
-    st.success(f"안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
-    st.header("학생 학습 경로")
-    st.caption("교과·단원을 고른 뒤 AI 튜터와 실습하고, 누적 기록은 [📓 나의 포트폴리오] 메뉴에서 확인할 수 있어요.")
+    st.markdown(f"## 안녕하세요, {sname} 학생! 오늘도 즐겁게 실습해봅시다.")
+    st.markdown(
+        '<p style="margin:0.5rem 0 1rem 0;color:#92400e;background:linear-gradient(180deg,#fffbeb 0%,#fef9c3 100%);'
+        'border:2px solid #facc15;border-radius:12px;padding:0.85rem 1.1rem;'
+        'font-size:1.06rem;line-height:1.55;font-weight:600;">'
+        "교과·단원을 고른 뒤 AI 튜터와 실습하고, 누적 기록은 <strong>[나의 포트폴리오]</strong> 메뉴에서 확인할 수 있어요."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
     selected_subject = "자동차 전기전자제어"
     unit_choices = CURRICULUM[selected_subject]
-    st.markdown("#### 🎯 오늘 어떤 실습을 할까요?")
-    st.caption("아래에서 단원 카드를 선택하세요. 선택한 단원에 맞춰 입력 예시와 미션이 달라집니다.")
-    unit_labels = [f"{UNIT_ICONS.get(u, '📘')} {u}" for u in unit_choices]
-    picked_label = st.radio(
-        "단원 선택",
-        unit_labels,
-        index=0,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="unit_radio_pick",
-    )
-    selected_unit = unit_choices[unit_labels.index(picked_label)]
+    idx_sel = int(st.session_state.get("student_unit_card_idx", 0) or 0)
+    idx_sel = max(0, min(idx_sel, len(unit_choices) - 1))
+    st.session_state["student_unit_card_idx"] = idx_sel
+
+    st.markdown("### 🎯 오늘 어떤 실습을 할까요?")
+    st.caption("큰 카드 버튼을 눌러 단원을 선택하세요. 선택에 맞춰 입력 예시와 AI 미션이 바뀝니다.")
+    row_top = st.columns(3)
+    row_bot = st.columns(3)
+    for idx, u in enumerate(unit_choices):
+        cols = row_top if idx < 3 else row_bot
+        c = idx if idx < 3 else idx - 3
+        icon = UNIT_ICONS.get(u, "📘")
+        with cols[c]:
+            if st.button(
+                f"{icon}  {u}",
+                key=f"student_unit_card_{idx}",
+                use_container_width=True,
+                type="primary" if idx == idx_sel else "secondary",
+            ):
+                st.session_state["student_unit_card_idx"] = idx
+                st.rerun()
+    selected_unit = unit_choices[idx_sel]
     st.markdown(
         f"""
         <div style="
             background: linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);
-            border:1px solid #93c5fd; border-radius:12px;
-            padding:0.65rem 1rem; margin:0.25rem 0 1rem 0;
-            font-size:0.95rem; color:#1e3a8a;">
-            <b>{UNIT_ICONS.get(selected_unit, '📘')} 선택된 단원:</b>
-            {selected_unit} <span style="color:#475569;">· {selected_subject}</span>
+            border:1px solid #93c5fd; border-radius:14px;
+            padding:0.95rem 1.2rem; margin:0.45rem 0 1.1rem 0;
+            font-size:1.05rem; color:#1e3a8a;">
+            <b style="font-size:1.12rem;">{UNIT_ICONS.get(selected_unit, '📘')} 선택된 단원</b><br/>
+            <span style="font-size:1.05rem;">{selected_unit}</span>
+            <span style="color:#475569;"> · {selected_subject}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -4113,6 +4130,7 @@ def init_session_state() -> None:
         "latest_unit": "",
         "student_id": "",
         "student_display_name": "",
+        "student_unit_card_idx": 0,
         "diag_step": "input",
         "latest_guidance": "",
         "latest_evaluation": "",
@@ -4409,10 +4427,10 @@ if st.session_state.app_role == "teacher":
     render_teacher_mode()
 else:
     if not st.session_state.get("student_logged_in"):
-        st.title("자동차 전기전자제어 — 학생 모드")
+        st.title("자동차 전기전자제어")
         render_student_login()
         st.stop()
-    st.title("자동차 전기전자제어 — 학생 모드")
+    st.title("자동차 전기전자제어")
     render_student_mode()
 st.markdown("---")
 st.caption("입력한 증상과 측정 데이터를 바탕으로 NCS 수행준거 기반 진단 학습을 진행할 수 있습니다.")
