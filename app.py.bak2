@@ -3413,20 +3413,10 @@ def _render_diagnosis_input_tab(
 
         # ─── 오늘의 수행 과제 카드 ───
         with st.container(border=True):
-            st.markdown(
-                f"""
-                <div style="
-                    font-size:1.7rem; font-weight:800; color:#1e3a8a;
-                    padding:0.6rem 0 0.7rem 0; margin-bottom:0.6rem;
-                    border-bottom:3px solid #2563eb;">
-                    {selected_unit}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.caption("아래 3가지만 짧게 적어 주세요. 자세한 가이드는 도움말 아이콘을 눌러 확인할 수 있어요.")
+            st.markdown(f"### 📝 오늘의 수행 과제  ·  {UNIT_ICONS.get(selected_unit, '📘')} {selected_unit}")
+            st.caption("아래 3가지만 짧게 적어 주세요. 자세한 가이드는 ❓ 도움말 아이콘을 눌러 확인할 수 있어요.")
 
-            st.markdown("**1. 대상 — 어디를 점검하나요?**")
+            st.markdown("**🔍 [대상]  어디를 점검하나요?**")
             target_part = st.text_input(
                 "대상 부품",
                 placeholder=hints["target"],
@@ -3435,7 +3425,7 @@ def _render_diagnosis_input_tab(
                 help="회로도 상의 부품 이름이나 커넥터 번호(예: E12)를 함께 적으면 더 정확한 안내가 가능합니다.",
             )
 
-            st.markdown("**2. 상태 — 지금 증상이 어떤가요?**")
+            st.markdown("**⚡ [상태]  지금 증상이 어떤가요?**")
             current_state = st.text_area(
                 "현재 상태",
                 placeholder=hints["state"],
@@ -3445,7 +3435,7 @@ def _render_diagnosis_input_tab(
                 help="멀티미터/스캐너로 측정한 값, 작동·미작동 상황, DTC 코드 등을 구체적으로 적어 주세요.",
             )
 
-            st.markdown("**3. 질문 — 무엇이 궁금한가요?**")
+            st.markdown("**❓ [질문]  무엇이 궁금한가요?**")
             learning_question = st.text_area(
                 "학습 질문",
                 placeholder=hints["question"],
@@ -3458,7 +3448,7 @@ def _render_diagnosis_input_tab(
         symptom_text = compose_structured_symptom(target_part, current_state, learning_question)
 
         # ─── 사진 업로드 (선택, 평소엔 접힘) ───
-        with st.expander("부품/측정 사진 업로드 (선택)", expanded=False):
+        with st.expander("📸 부품/측정 사진 업로드 (선택)", expanded=False):
             uploaded_image = st.file_uploader(
                 "사진 첨부",
                 type=["png", "jpg", "jpeg", "webp"],
@@ -3469,7 +3459,7 @@ def _render_diagnosis_input_tab(
                 st.image(uploaded_image, caption="업로드된 사진", use_container_width=True)
             render_photo_upload_checklist(selected_unit)
 
-        run_step1 = st.button("1단계: AI 가이드 받기", type="primary", use_container_width=True)
+        run_step1 = st.button("🚀 1단계: AI 가이드 받기", type="primary", use_container_width=True)
         if run_step1:
             if genai is None:
                 st.error("Gemini 라이브러리가 설치되지 않았습니다. `pip install google-genai` 후 다시 실행해 주세요.")
@@ -4114,41 +4104,7 @@ def render_student_mode() -> None:
         unsafe_allow_html=True,
     )
     _render_diagnosis_progress(st.session_state.get("diag_step", "input"))
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stTabs"] button[role="tab"] {
-            font-size: 1.25rem !important;
-            font-weight: 800 !important;
-            padding: 0.85rem 1.4rem !important;
-            min-height: 3.1rem !important;
-            color: #1e293b !important;
-            background: linear-gradient(180deg,#f1f5f9 0%,#e2e8f0 100%) !important;
-            border-radius: 10px 10px 0 0 !important;
-            margin-right: 6px !important;
-        }
-        div[data-testid="stTabs"] button[role="tab"] p {
-            font-size: 1.25rem !important;
-            font-weight: 800 !important;
-        }
-        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-            background: linear-gradient(180deg,#2563eb 0%,#1d4ed8 100%) !important;
-            color: #ffffff !important;
-            box-shadow: 0 4px 14px rgba(37,99,235,0.35) !important;
-        }
-        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p {
-            color: #ffffff !important;
-        }
-        div[data-testid="stTabs"] [data-baseweb="tab-list"] {
-            gap: 4px !important;
-            border-bottom: 2px solid #cbd5e1 !important;
-            padding-bottom: 0 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    tab_input, tab_feedback, tab_ncs = st.tabs(["실습 수행", "AI 코칭", "성취도 분석"])
+    tab_input, tab_feedback, tab_ncs = st.tabs(["📝 실습 수행", "🔍 AI 코칭", "📈 성취도 분석"])
     with tab_input:
         _render_diagnosis_input_tab(
             mode=mode,
