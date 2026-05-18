@@ -741,7 +741,7 @@ def render_mission_step_photos_gallery(rec: dict) -> None:
     photos = parse_mission_step_photos(rec)
     if not photos:
         return
-    st.markdown("**미션 단계별 수행 사진**")
+    st.markdown("**📷 미션 단계별 수행 사진**")
     n = min(3, len(photos))
     cols = st.columns(n if n > 0 else 1)
     for i, p in enumerate(photos):
@@ -1285,13 +1285,13 @@ def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, cat
             _render_ncs_badge(ncs)
 
             if method:
-                st.markdown(f"**측정 / 관찰 방법**")
+                st.markdown(f"**🛠 측정 / 관찰 방법**")
                 st.markdown(f"> {method}")
             if other_md_lines:
                 st.markdown("\n".join(other_md_lines))
 
             if record:
-                st.markdown("**단계 2 기록 가이드** — 아래 줄을 복사해 [실습 수행 결과] 입력란에 붙여 넣으세요:")
+                st.markdown("**📝 단계 2 기록 가이드** — 아래 줄을 복사해 [실습 수행 결과] 입력란에 붙여 넣으세요:")
                 # 따옴표 제거(시각상 깔끔하게)하되 측정값 굵게는 마크다운이 안 먹는 st.code 에 맞춰
                 # 그대로 두는 게 학생에게는 더 직관적이다.
                 copy_text = record.strip().strip('"').strip("'")
@@ -1330,7 +1330,7 @@ def _render_step_cards(steps: list[dict], icon: str, empty_msg: str = "", *, cat
                     photos.pop(slot_key, None)
                     st.rerun()
             else:
-                st.caption("단계별 인증 사진은 **[📝 실습 수행]** 탭의 미션 카드에서만 등록할 수 있습니다.")
+                st.caption("📷 단계별 인증 사진은 **[📝 실습 수행]** 탭의 미션 카드에서만 등록할 수 있습니다.")
 
 
 def _render_eval_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -> None:
@@ -1375,12 +1375,12 @@ def _render_eval_step_cards(steps: list[dict], icon: str, empty_msg: str = "") -
         with st.expander(header, expanded=(idx == 0)):
             _render_regulation_badges(bold_values)
             if title_tail_comment:
-                st.markdown(f"{title_tail_comment}")
+                st.markdown(f"💬 {title_tail_comment}")
             if comment:
-                st.markdown("**평가 코멘트**")
+                st.markdown("**💬 평가 코멘트**")
                 st.markdown(f"> {comment}")
             if fix and fix != "-":
-                st.markdown("**다음 실습 보완 포인트**")
+                st.markdown("**🛠 다음 실습 보완 포인트**")
                 st.markdown(f"> {fix}")
             if other_md_lines:
                 st.markdown("\n".join(other_md_lines))
@@ -1409,7 +1409,7 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
     photo = _find_h2_body(h2_sections, "추가 촬영")
 
     # ─── 미션 브리핑 배너 ───
-    with st.chat_message("assistant", avatar=""):
+    with st.chat_message("assistant", avatar="🧭"):
         st.markdown(
             '<div style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);'
             'color:#fef3c7;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
@@ -1421,13 +1421,13 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
         st.caption("정답은 없어. 너만의 진단 미션이지! 아래 3개 탭을 순서대로 클릭해 보자.")
         if summary:
             with st.container(border=True):
-                st.markdown("#### 미션 요약")
+                st.markdown("#### 🎯 미션 요약")
                 st.markdown(summary)
 
     # ─── 레거시 폴백: 새 포맷(H3 4카테고리)이 없으면 원문 마크다운 그대로 ───
     if not parsed["has_new_format"]:
         with st.container(border=True):
-            st.markdown("##### 가이드 원문 (이전 포맷)")
+            st.markdown("##### 📜 가이드 원문 (이전 포맷)")
             st.markdown(guidance_text)
         return
 
@@ -1439,13 +1439,13 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
     with tab_safety:
         if target:
             with st.container(border=True):
-                st.markdown("#### 점검 대상")
+                st.markdown("#### 📍 점검 대상")
                 st.markdown(target)
         if safety_notes:
             with st.container(border=True):
-                st.markdown("#### 안전 주의")
+                st.markdown("#### ⚠ 안전 주의")
                 st.markdown(safety_notes)
-        st.markdown("##### 준비 / 안전 단계")
+        st.markdown("##### 🛡️ 준비 / 안전 단계")
         _render_step_cards(
             groups["safety"], "🛡️",
             empty_msg="준비/안전 단계가 비어 있어요. 점화 OFF · 절연장갑 등 기본 점검을 먼저 확인하세요.",
@@ -1456,13 +1456,13 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
     with tab_measure:
         if tools:
             with st.container(border=True):
-                st.markdown("#### 권장 측정 도구")
+                st.markdown("#### 🛠 권장 측정 도구")
                 st.markdown(tools)
         if groups["inspect"]:
-            st.markdown("##### 점검 / 회로도 단계")
+            st.markdown("##### 🔍 점검 / 회로도 단계")
             _render_step_cards(groups["inspect"], "🔍", category_id="inspect", enable_step_photos=enable_step_photos)
             st.markdown("")
-        st.markdown("##### 측정 / 전압 단계")
+        st.markdown("##### ⚡ 측정 / 전압 단계")
         _render_step_cards(
             groups["measure"], "⚡",
             empty_msg="측정 단계가 비어 있어요. 멀티미터 모드와 측정 포인트를 먼저 확인하세요.",
@@ -1471,7 +1471,7 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
         )
 
     with tab_judge:
-        st.markdown("##### 판정 / 조치 단계")
+        st.markdown("##### 🛠️ 판정 / 조치 단계")
         _render_step_cards(
             groups["judge"], "🛠️",
             empty_msg="판정 단계가 비어 있어요. 측정값을 규정값과 비교해 판정해 보세요.",
@@ -1480,10 +1480,10 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
         )
         if hint:
             with st.container(border=True):
-                st.markdown("#### 학습 질문 힌트")
+                st.markdown("#### 💡 학습 질문 힌트")
                 st.markdown(hint)
         if photo:
-            with st.expander("추가 촬영 가이드", expanded=False):
+            with st.expander("📷 추가 촬영 가이드", expanded=False):
                 st.markdown(photo)
 
 
@@ -1556,7 +1556,7 @@ def render_evaluation_card(evaluation_text: str) -> None:
     category_items = _parse_category_summary(cat_summary_body)
 
     # ─── 결과 배너 + 한줄 요약 ───
-    with st.chat_message("assistant", avatar=""):
+    with st.chat_message("assistant", avatar="📝"):
         st.markdown(
             '<div style="background:linear-gradient(135deg,#065f46 0%,#10b981 100%);'
             'color:#ecfdf5;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
@@ -1577,12 +1577,12 @@ def render_evaluation_card(evaluation_text: str) -> None:
     # ─── 레거시 폴백 ───
     if not parsed["has_new_format"] and not category_items:
         with st.container(border=True):
-            st.markdown("##### 평가 원문 (이전 포맷)")
+            st.markdown("##### 📜 평가 원문 (이전 포맷)")
             st.markdown(evaluation_text)
         return
 
     # ─── 4 카테고리 시각 카드 (2x2 그리드) ───
-    st.markdown("#### 카테고리별 평가 — 한눈에 보기")
+    st.markdown("#### 🏷 카테고리별 평가 — 한눈에 보기")
     if not category_items:
         st.caption(
             "AI 응답에 '🏷 카테고리 요약' 섹션이 포함되지 않았습니다. "
@@ -1614,9 +1614,9 @@ def render_evaluation_card(evaluation_text: str) -> None:
     if not has_detail:
         return
 
-    with st.expander("상세 평가 — 단계별 충실도 / 4축 분석 / 다음 미션", expanded=False):
+    with st.expander("🔍 상세 평가 — 단계별 충실도 / 4축 분석 / 다음 미션", expanded=False):
         if any(groups.values()):
-            st.markdown("##### 가이드 대비 수행 충실도")
+            st.markdown("##### ✅ 가이드 대비 수행 충실도")
             cat_safety, cat_measure, cat_judge = st.tabs(
                 ["🛡️ 준비 / 안전", "⚡ 측정 미션", "🛠️ 고장 판정"]
             )
@@ -1624,24 +1624,24 @@ def render_evaluation_card(evaluation_text: str) -> None:
                 _render_eval_step_cards(groups["safety"], "🛡️", empty_msg="해당 카테고리 평가가 없어요.")
             with cat_measure:
                 if groups["inspect"]:
-                    st.markdown("**점검 / 회로도**")
+                    st.markdown("**🔍 점검 / 회로도**")
                     _render_eval_step_cards(groups["inspect"], "🔍")
                     st.markdown("")
-                st.markdown("**측정 / 전압**")
+                st.markdown("**⚡ 측정 / 전압**")
                 _render_eval_step_cards(groups["measure"], "⚡", empty_msg="해당 카테고리 평가가 없어요.")
             with cat_judge:
                 _render_eval_step_cards(groups["judge"], "🛠️", empty_msg="해당 카테고리 평가가 없어요.")
         if axis_analysis:
             with st.container(border=True):
-                st.markdown("**NCS 기준 4축 분석**")
+                st.markdown("**🔍 NCS 기준 4축 분석**")
                 st.markdown(axis_analysis)
         if weak_units:
             with st.container(border=True):
-                st.markdown("**보완이 필요한 능력 단위 요소**")
+                st.markdown("**🛠 보완이 필요한 능력 단위 요소**")
                 st.markdown(weak_units)
         if next_mission:
             with st.container(border=True):
-                st.markdown("**다음 학습 미션**")
+                st.markdown("**🚀 다음 학습 미션**")
                 st.markdown(next_mission)
 
 
@@ -2258,7 +2258,7 @@ def render_ncs_achievement(
         st.caption("ℹ️ 가이드 충실도 가중치가 반영된 성취율입니다 (가이드 이행=100%, 자율 수행=70%).")
 
     # ─── 4개 수행준거별 진행 카드 ───
-    st.markdown(f"#### 세부 수행준거 4가지 — {unit_name}")
+    st.markdown(f"#### 📋 세부 수행준거 4가지 — {unit_name}")
     for idx, row in enumerate(rows):
         _render_criterion_progress(idx, row)
 
@@ -2266,12 +2266,12 @@ def render_ncs_achievement(
     weak_rows = [r for r in rows if r["completion"] < 0.4]
     if weak_rows:
         with st.container(border=True):
-            st.markdown("##### 다음 실습 동선 제안")
+            st.markdown("##### 🚀 다음 실습 동선 제안")
             for r in weak_rows[:2]:
                 examples = ", ".join(f"`{k}`" for k in r["example_keywords"][:3])
                 st.markdown(f"- **{r['label']}** — 결과에 {examples} 등의 표현을 포함해 보세요.")
     elif good_count == len(rows):
-        st.success("오늘 실습의 핵심 수행준거가 모두 잘 반영되었습니다. 멋진 하루였어요!")
+        st.success("🎉 오늘 실습의 핵심 수행준거가 모두 잘 반영되었습니다. 멋진 하루였어요!")
 def gs_app_sheets_ready() -> bool:
     """Secrets 에 [connections.gsheets] 섹션이 있는지 + 실제 연결이 생성되는지 확인한다.
 
@@ -2494,7 +2494,7 @@ def render_db_diagnostic_panel() -> None:
       - '🧪 시트 쓰기 테스트' 로 즉시 round-trip 검증
     을 확인할 수 있다.
     """
-    with st.expander("DB 저장 상태", expanded=False):
+    with st.expander("🔧 DB 저장 상태", expanded=False):
         ready = gs_app_sheets_ready()
         summary = _get_gsheets_secrets_summary()
         if ready and summary["type"] == "service_account":
@@ -2533,7 +2533,7 @@ def render_db_diagnostic_panel() -> None:
                 f"오류: `{last.get('error')}`"
             )
 
-        if st.button("시트 쓰기 테스트 실행", key="db_diag_smoke_test_btn",
+        if st.button("🧪 시트 쓰기 테스트 실행", key="db_diag_smoke_test_btn",
                       help="더미 'heartbeat' 행을 1줄 쓰고 즉시 다시 읽어 round-trip 을 확인합니다."):
             with st.spinner("시트에 더미 행을 써 보고 다시 읽는 중…"):
                 result = run_sheet_write_smoke_test()
@@ -3024,7 +3024,7 @@ def render_teacher_mode() -> None:
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    st.subheader("학생별 성취도 및 진도 분석")
+    st.subheader("👩‍🎓 학생별 성취도 및 진도 분석")
     sel_sid = None
     stud_recs_for_fb: list[dict] = []
     if not records:
@@ -3046,16 +3046,16 @@ def render_teacher_mode() -> None:
 
         col_prog, col_radar = st.columns([1, 1])
         with col_prog:
-            st.markdown("##### 단원별 진도 (실습 제출 횟수)")
+            st.markdown("##### 📋 단원별 진도 (실습 제출 횟수)")
             attempts = _student_unit_attempt_counts(records, str(sel_sid))
             for u in NCS_UNITS:
                 n = attempts.get(u, 0)
                 if n > 0:
-                    st.markdown(f"**{u}** ({n}회)")
+                    st.markdown(f"✅ **{u}** ({n}회)")
                 else:
                     st.markdown(f"⬜ **{u}** (미수행)")
         with col_radar:
-            st.markdown("##### 능력단위별 성취도 (루브릭 추정 %)")
+            st.markdown("##### 📊 능력단위별 성취도 (루브릭 추정 %)")
             if go is None:
                 st.info("레이더 차트를 보려면 `pip install plotly`로 Plotly를 설치해 주세요.")
             else:
@@ -3081,7 +3081,7 @@ def render_teacher_mode() -> None:
                 )
                 st.plotly_chart(fig_s, use_container_width=True)
 
-        st.subheader("AI 튜터의 학생 종합 평가 코멘트")
+        st.subheader("🤖 AI 튜터의 학생 종합 평가 코멘트")
         digest_rows = _build_teacher_ai_digest_rows(stud_recs_for_fb, max_sessions=3)
         if not digest_rows:
             st.caption(
@@ -3328,9 +3328,9 @@ def render_student_login() -> None:
 
 
 _DIAG_STEPS = [
-    ("input", "입력", "부품·증상·학습 질문"),
-    ("guidance", "미션 수행", "AI 미션 따라 실측·기록"),
-    ("result", "완료", "성취도 분석 & 피드백"),
+    ("input", "📝 입력", "부품·증상·학습 질문"),
+    ("guidance", "🎯 미션 수행", "AI 미션 따라 실측·기록"),
+    ("result", "🏆 완료", "성취도 분석 & 피드백"),
 ]
 
 
@@ -3518,13 +3518,13 @@ def _render_diagnosis_input_tab(
     # ──────────────────── [단계 2] 가이드 표시 + 실습 결과 입력 ────────────────────
     if diag_step == "guidance":
         st.subheader("② AI 가이드 확인 → 실습 수행")
-        st.success("1단계 완료! 아래 미션을 따라 실측한 뒤 결과를 입력하면, AI가 충실도와 NCS 정렬을 평가합니다.")
+        st.success("✅ 1단계 완료! 아래 미션을 따라 실측한 뒤 결과를 입력하면, AI가 충실도와 NCS 정렬을 평가합니다.")
         with st.expander("내가 입력한 증상 다시 보기", expanded=False):
             st.code(st.session_state.get("latest_symptom") or "(미입력)")
         st.markdown("---")
         render_mission_card(st.session_state.get("latest_guidance", ""))
         st.markdown("---")
-        st.markdown("#### 실습 수행 결과 입력")
+        st.markdown("#### 🧪 실습 수행 결과 입력")
         st.markdown(
             # 글자색을 어두운 슬레이트(#1e293b)로 명시해 라이트/다크 테마 어디서도 명확히 보이게 한다.
             '<div style="background:#fffbeb;border:1px solid #fde68a;border-left:5px solid #f59e0b;'
@@ -3563,7 +3563,7 @@ def _render_diagnosis_input_tab(
 
         # ─── 📝 오늘의 실습 소감 ───
         with st.container(border=True):
-            st.markdown("### 오늘의 실습 소감")
+            st.markdown("### 📝 오늘의 실습 소감")
             st.caption(
                 "오늘 실습에서 어려웠던 점, 새롭게 알게 된 점, 다음 실습에서 더 잘하고 싶은 점을 자유롭게 적어 주세요. "
                 "여기에 적은 소감은 [나의 포트폴리오 — 성장 일지]에 그대로 보관됩니다."
@@ -3585,7 +3585,7 @@ def _render_diagnosis_input_tab(
                 st.session_state.diag_step = "input"
                 st.rerun()
         with col_submit:
-            run_step2 = st.button("2단계: 실습 결과 제출 & 평가받기", type="primary", use_container_width=True)
+            run_step2 = st.button("✅ 2단계: 실습 결과 제출 & 평가받기", type="primary", use_container_width=True)
         if run_step2:
             if not execution_result.strip():
                 st.warning("실습 수행 결과를 한 줄 이상 입력해 주세요.")
@@ -3658,7 +3658,7 @@ def _render_diagnosis_input_tab(
                 st.session_state["_save_banner_msg"] = (
                     f"✅ 시트 저장 완료 — 단원 [{record.get('unit')}] · 누적 {len(refreshed)}건"
                 )
-                st.toast("성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="")
+                st.toast("📈 성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="🎉")
                 st.balloons()
                 # 성공 시에만 rerun → 단계 3 화면으로 전환
                 st.rerun()
@@ -3695,7 +3695,7 @@ def _render_diagnosis_input_tab(
         if st.session_state.get("latest_execution_result"):
             st.markdown("**실습 수행 결과**")
             st.code(st.session_state.get("latest_execution_result", ""))
-    if st.button("새 진단 시작하기", type="primary", use_container_width=True):
+    if st.button("🔄 새 진단 시작하기", type="primary", use_container_width=True):
         reset_diagnosis_flow()
         st.rerun()
 
@@ -3706,7 +3706,7 @@ def _render_diagnosis_feedback_tab() -> None:
     회차별 PDF 다운로드 기능은 제거되었다. 모든 학기 누적 PDF 출력은
     사이드바 메뉴의 **📓 나의 포트폴리오** 에서 한 번에 생성한다.
     """
-    st.subheader("AI 코칭 — 진단 가이드 & 수행 평가")
+    st.subheader("🔍 AI 코칭 — 진단 가이드 & 수행 평가")
     diag_step = st.session_state.get("diag_step", "input")
     guidance_text = st.session_state.get("latest_guidance", "")
     evaluation_text = st.session_state.get("latest_evaluation", "")
@@ -3720,7 +3720,7 @@ def _render_diagnosis_feedback_tab() -> None:
         render_photo_retake_notice(guidance_text)
         render_mission_card(guidance_text, enable_step_photos=False)
     if diag_step == "guidance" and not evaluation_text:
-        st.info("[단계 2] 실습 수행 결과를 [📝 실습 수행] 탭에서 제출하면 평가 카드가 이 아래에 추가됩니다.")
+        st.info("📌 [단계 2] 실습 수행 결과를 [📝 실습 수행] 탭에서 제출하면 평가 카드가 이 아래에 추가됩니다.")
     if evaluation_text:
         st.markdown("---")
         render_evaluation_card(evaluation_text)
@@ -3743,7 +3743,7 @@ def _render_diagnosis_feedback_tab() -> None:
 
 def _render_diagnosis_ncs_tab() -> None:
     """📈 성취도 분석 탭: [단계 2] 결과 입력 후, 오늘 수행한 단원 1개에만 집중해 분석한다."""
-    st.subheader("성취도 분석 — 오늘 수행한 단원에 집중")
+    st.subheader("📈 성취도 분석 — 오늘 수행한 단원에 집중")
     diag_step = st.session_state.get("diag_step", "input")
     if diag_step != "result":
         st.info(
@@ -3830,35 +3830,35 @@ def _render_portfolio_card(rec: dict) -> None:
         # ── 성취도 요약 (상단 메트릭 3종) ─────────────────────────────
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            st.metric("NCS 종합", f"{overall_rate:.0f} / 100")
+            st.metric("🎯 NCS 종합", f"{overall_rate:.0f} / 100")
         with col_b:
             unit_match = next(
                 (u for u in unit_scores if u.get("unit") == unit_name),
                 None,
             )
             unit_pct = float(unit_match.get("completion") or 0.0) * 100 if unit_match else overall_rate
-            st.metric("단원 달성률", f"{unit_pct:.0f}%")
+            st.metric("📘 단원 달성률", f"{unit_pct:.0f}%")
         with col_c:
             reflection_len = len((rec.get("reflection") or "").strip())
-            st.metric("소감 분량", f"{reflection_len}자")
+            st.metric("📝 소감 분량", f"{reflection_len}자")
 
         # 수행 내용 — 학생이 입력한 [대상/상태/질문] 요약
         symptom = (rec.get("symptom") or "").strip()
         if symptom:
-            st.markdown("**수행 내용 — 대상 / 상태 / 학습 질문**")
+            st.markdown("**🔍 수행 내용 — 대상 / 상태 / 학습 질문**")
             st.code(symptom, language="text")
 
         # 실습 수행 결과 — 학생이 직접 적은 측정/판정
         reasoning = (rec.get("reasoning") or "").strip()
         if reasoning:
-            st.markdown("**나의 실습 수행 결과**")
+            st.markdown("**🧪 나의 실습 수행 결과**")
             st.code(reasoning, language="text")
 
         # AI 코칭 — 가이드 텍스트의 앞부분(미션 요약 + 첫 카테고리)을 요약 노출
         combined = rec.get("result") or ""
         guidance_text, evaluation_text = split_combined_result(combined)
         if guidance_text.strip():
-            st.markdown("**AI 코칭 — 미션 가이드 요약**")
+            st.markdown("**🧭 AI 코칭 — 미션 가이드 요약**")
             preview = guidance_text.strip()
             preview = preview[:600] + (" …" if len(preview) > 600 else "")
             with st.container(border=True):
@@ -3866,7 +3866,7 @@ def _render_portfolio_card(rec: dict) -> None:
 
         # AI 평가 — 평가 카드(있을 때만 미리보기)
         if evaluation_text.strip():
-            st.markdown("**AI 평가 — 수행 평가 요약**")
+            st.markdown("**🏆 AI 평가 — 수행 평가 요약**")
             eval_preview = evaluation_text.strip()
             eval_preview = eval_preview[:600] + (" …" if len(eval_preview) > 600 else "")
             with st.container(border=True):
@@ -3874,7 +3874,7 @@ def _render_portfolio_card(rec: dict) -> None:
 
         # 나의 소감 — 노란 하이라이트 카드
         reflection = (rec.get("reflection") or "").strip()
-        st.markdown("**나의 소감**")
+        st.markdown("**📝 나의 소감**")
         if reflection:
             st.markdown(
                 '<div style="background:#fefce8;border-left:5px solid #facc15;'
@@ -3891,7 +3891,7 @@ def _render_portfolio_card(rec: dict) -> None:
         if image_b64:
             img_bytes = thumbnail_b64_to_bytes(image_b64)
             if img_bytes:
-                st.markdown("**1단계 입력 시 첨부 사진**")
+                st.markdown("**📷 1단계 입력 시 첨부 사진**")
                 st.image(img_bytes, width=360)
 
         render_mission_step_photos_gallery(rec)
@@ -3899,7 +3899,7 @@ def _render_portfolio_card(rec: dict) -> None:
         # 교사 피드백 (있을 때만)
         tf = (rec.get("teacher_feedback") or "").strip()
         if tf:
-            st.markdown("**교사 피드백**")
+            st.markdown("**🗒 교사 피드백**")
             st.success(tf)
 
 
@@ -3932,7 +3932,7 @@ def _render_portfolio_view() -> None:
     # 사용자가 "🔄 시트에서 새로 불러오기" 버튼을 누르면 캐시를 무시하고 다시 읽는다.
     col_refresh, col_meta = st.columns([1, 4])
     with col_refresh:
-        if st.button("시트에서 새로 불러오기", key="portfolio_force_refresh",
+        if st.button("🔄 시트에서 새로 불러오기", key="portfolio_force_refresh",
                      help="구글 시트 history 탭을 강제로 다시 읽어 누적 기록을 새로고침합니다."):
             refreshed = refresh_my_history_cache()
             st.success(f"새로 불러온 누적 실습 이력: {len(refreshed)}건")
@@ -4081,7 +4081,7 @@ def render_student_mode() -> None:
     idx_sel = max(0, min(idx_sel, len(unit_choices) - 1))
     st.session_state["student_unit_card_idx"] = idx_sel
 
-    st.markdown("### 오늘 어떤 실습을 할까요?")
+    st.markdown("### 🎯 오늘 어떤 실습을 할까요?")
     st.caption("큰 카드 버튼을 눌러 단원을 선택하세요. 선택에 맞춰 입력 예시와 AI 미션이 바뀝니다.")
     row_top = st.columns(3)
     row_bot = st.columns(3)
@@ -4160,7 +4160,7 @@ def render_student_mode() -> None:
         _render_diagnosis_feedback_tab()
     with tab_ncs:
         _render_diagnosis_ncs_tab()
-    st.caption("누적 실습 기록은 사이드바의 [📓 나의 포트폴리오] 메뉴에서 주차별 성장 일지 형태로 모아볼 수 있어요.")
+    st.caption("📌 누적 실습 기록은 사이드바의 [📓 나의 포트폴리오] 메뉴에서 주차별 성장 일지 형태로 모아볼 수 있어요.")
 
 
 def init_session_state() -> None:
@@ -4451,10 +4451,10 @@ with st.sidebar:
         )
         c_sync, c_out = st.columns(2)
         with c_sync:
-            if st.button("동기화", key="student_sync_btn",
+            if st.button("🔄 동기화", key="student_sync_btn",
                           help="구글 시트 history 탭에서 내 기록을 다시 끌어옵니다."):
                 refreshed = refresh_my_history_cache()
-                st.toast(f"누적 실습 이력 {len(refreshed)}건을 다시 불러왔어요.", icon="")
+                st.toast(f"누적 실습 이력 {len(refreshed)}건을 다시 불러왔어요.", icon="📚")
                 st.rerun()
         with c_out:
             if st.button("로그아웃", key="student_logout_btn"):
