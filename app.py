@@ -1409,7 +1409,7 @@ def render_mission_card(guidance_text: str, *, enable_step_photos: bool = True) 
     photo = _find_h2_body(h2_sections, "추가 촬영")
 
     # ─── 미션 브리핑 배너 ───
-    with st.chat_message("assistant", avatar=""):
+    with st.chat_message("assistant", avatar="🧭"):
         st.markdown(
             '<div style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);'
             'color:#fef3c7;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
@@ -1556,7 +1556,7 @@ def render_evaluation_card(evaluation_text: str) -> None:
     category_items = _parse_category_summary(cat_summary_body)
 
     # ─── 결과 배너 + 한줄 요약 ───
-    with st.chat_message("assistant", avatar=""):
+    with st.chat_message("assistant", avatar="📝"):
         st.markdown(
             '<div style="background:linear-gradient(135deg,#065f46 0%,#10b981 100%);'
             'color:#ecfdf5;padding:0.7rem 1rem;border-radius:10px;font-weight:700;'
@@ -3658,7 +3658,7 @@ def _render_diagnosis_input_tab(
                 st.session_state["_save_banner_msg"] = (
                     f"✅ 시트 저장 완료 — 단원 [{record.get('unit')}] · 누적 {len(refreshed)}건"
                 )
-                st.toast("성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="")
+                st.toast("성취도 분석 결과가 준비됐어요! 상단 [📈 성취도 분석] 탭을 확인해 주세요.", icon="📊")
                 st.balloons()
                 # 성공 시에만 rerun → 단계 3 화면으로 전환
                 st.rerun()
