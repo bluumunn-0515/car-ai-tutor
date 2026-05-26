@@ -190,22 +190,63 @@ STANDARD_PROCEDURE_BLOCK = """
 """.strip()
 
 def build_learning_prompt(user_symptom: str, selected_unit: str) -> str:
+    """NCS 능력단위 하위요소를 반영한 스캐폴딩(scaffolding) 가이드 프롬프트."""
+    sub_elements = NCS_RUBRIC.get(selected_unit, [])
+    sub_text_lines = []
+    for i, (name, keywords) in enumerate(sub_elements, 1):
+        kw = ", ".join(keywords[:8])
+        sub_text_lines.append(f"  {i}. {name}  —  핵심 키워드: {kw}")
+    sub_text = "\n".join(sub_text_lines) if sub_text_lines else "  (해당 단원의 세부 수행준거 없음)"
+
     return f"""
-너는 '자동차 전기전자제어' AI 튜터다. 학생에게 정답을 주지 말고 '미션'과 '측정 방법'만 제시해라.
+너는 '자동차 전기전자제어' NCS 기반 AI 튜터다.
+역할: 학생이 스스로 답을 찾도록 돕는 **스캐폴딩(scaffolding)** 학습 가이드를 제공한다.
+
+[핵심 원칙]
+- 정답이나 최종 결론을 바로 말하지 말고, "무엇을 어떻게 점검/측정해야 하는가"의 절차·판정 기준만 제시한다.
+- 학생이 입력한 [대상 부품], [현재 상태], [학습 질문]을 반드시 인용·반영하여 맞춤형으로 작성한다.
+- NCS 순서(안전 → 회로 이해 → 측정 → 판정/조치)를 반드시 지킨다.
+- 각 단계마다 (1) 무엇을 할지, (2) 어떤 도구·계측기를 어떻게 쓸지, (3) 통과/불통과 판정 기준 수치를 함께 제시한다.
+- 학생이 사진을 첨부했다면, 사진에서 관찰 가능한 단서(커넥터·단자·계기 눈금 등) 1~2가지를 짚어준다.
+- 학습 질문에 대해서는 직접 답하지 말고, 학생이 스스로 결론에 도달하도록 **소크라테스식 안내 질문**으로 마무리한다.
+
 [단원] {selected_unit}
-[입력 증상] {user_symptom}
+
+[학생 입력]
+{user_symptom or '(미입력)'}
+
 {STANDARD_PROCEDURE_BLOCK}
-## 🎯 미션 요약: ...
-## 📋 NCS 기반 수행 순서:
-### 🛡️ 준비 / 안전
-• ...
-### 🔍 점검 / 회로도
-• ...
-### ⚡ 측정 / 전압
-• ...
-### 🛠️ 판정 / 조치
-• ...
-"""
+
+[이 단원의 NCS 수행준거 하위 요소]
+{sub_text}
+
+다음 형식으로만 출력한다. 각 항목은 학생 입력을 반영해 구체적이고 풍부하게(3~5줄) 작성한다.
+
+## 🎯 오늘의 미션 요약
+- 학생이 입력한 대상 부품과 현재 상태를 토대로, 이번 시간에 해결해야 할 미션을 한두 문장으로 정리.
+
+## 🧭 진단 흐름 한눈에 보기
+- 안전 → 회로 → 측정 → 판정 4단계 핵심을 한 줄씩 요약.
+
+## 🛡️ 1단계 · 준비 / 안전
+- 사전 안전 점검 사항 2~3개 (전원 차단, 보호구, 정비지침서 확인 등).
+- 준비할 도구·계측기 목록.
+
+## 🔍 2단계 · 점검 / 회로도
+- 회로도/배선/커넥터에서 추적해야 할 흐름 (전원 → 퓨즈 → 스위치 → 부하 → 접지) 안내.
+- 학생이 회로도에서 찾아야 할 핵심 포인트 1~2개를 질문 형태로 제시.
+
+## ⚡ 3단계 · 측정 / 전압
+- 멀티미터·오실로스코프·스캐너 활용법 (모드·레인지·접점 위치).
+- 측정 포인트 **2개 이상**과 각각의 **정상 기준값**(예: OCV 12.3V±0.2, 전압강하 0.2V 이하 등)을 명시.
+
+## 🛠️ 4단계 · 판정 / 조치
+- 측정 결과에 따라 갈리는 두 갈래 시나리오(이러면 정상 / 이러면 이상).
+- 이상일 때 추가 점검·조치 방향. (정답·고장 원인을 단정하지 말 것)
+
+## 💡 학생 질문에 대한 안내
+- [학습 질문]에 직접 답하지 말고, 학생이 스스로 답을 찾도록 **2~3개의 소크라테스식 안내 질문**으로 마무리.
+""".strip()
 
 def build_evaluation_prompt(user_symptom: str, student_reasoning: str, selected_unit: str, guidance_text: str) -> str:
     return f"""
@@ -615,7 +656,17 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
                 help="오늘 실습하는 부품이나 장치의 고장 및 진단, 정비 방법에 대해 자유롭게 질문하세요.",
                 height=110,
             )
-            img = st.file_uploader("📸 사진 업로드", type=["jpg", "png"])
+            img = st.file_uploader(
+                "📸 사진 업로드",
+                type=["jpg", "jpeg", "png"],
+                help="실습 부품·계측기·회로도 등의 사진을 올리면 AI가 사진 단서까지 반영해 가이드를 만들어줘요.",
+            )
+            if img is not None:
+                try:
+                    st.image(img, caption=f"📷 업로드한 사진 미리보기 — {img.name}", width=360)
+                except Exception as _e:
+                    logger.warning("사진 미리보기 표시 실패: %s", _e)
+                    st.caption("⚠ 사진 미리보기를 표시하지 못했어요. 파일 형식을 확인해 주세요.")
 
             st.markdown("")
             if st.button("🚀 AI 가이드 받기", type="primary", use_container_width=True):
