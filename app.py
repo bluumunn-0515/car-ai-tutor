@@ -1291,10 +1291,10 @@ _PORTFOLIO_CSS = """
     box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }
 .pf-rec-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.pf-rec-title { font-size:18px; font-weight:700; color:#111827; }
-.pf-rec-date { font-size:13px; color:#6B7280; margin-top:2px; }
-.pf-chip { display:inline-block; padding:5px 12px; border-radius:999px;
-    font-size:13px; font-weight:700; margin-left:4px; }
+.pf-rec-title { font-size:27px; font-weight:800; color:#111827; letter-spacing:-0.2px; }
+.pf-rec-date { font-size:20px; color:#4B5563; margin-top:4px; font-weight:500; }
+.pf-chip { display:inline-block; padding:6px 14px; border-radius:999px;
+    font-size:15px; font-weight:700; margin-left:4px; }
 .pf-chip-fb { background:#DBEAFE; color:#1D4ED8; }
 .pf-chip-wait { background:#F3F4F6; color:#6B7280; }
 .pf-chip-chance { background:#FEF3C7; color:#92400E; }
@@ -1366,11 +1366,15 @@ def _render_achievement_charts(records: list[dict]) -> None:
     unit_rows = _aggregate_unit_scores(records)
     cat_avgs = _aggregate_category_scores(records)
 
-    # 모든 차트에 공통 적용할 색상 설정 (흰 배경 위에서 진한 글자)
-    text_color = "#1F2937"   # 본문 회색-검정
-    title_color = "#1E3A8A"  # 진한 남색
-    axis_color = "#374151"   # 진한 회색
+    # 모든 차트에 공통 적용할 색상 설정 (흰 배경 위에서 진한 글자, 1.5배 확대)
+    text_color = "#1F2937"
+    title_color = "#1E3A8A"
+    axis_color = "#374151"
     grid_color = "#E5E7EB"
+    FONT_TITLE = 26    # 기존 18 × 1.5
+    FONT_BODY  = 21    # 기존 14 × 1.5
+    FONT_TICK  = 20    # 기존 13~14 × 1.5
+    FONT_RADIAL = 18   # 기존 12 × 1.5
 
     col1, col2 = st.columns(2)
     with col1:
@@ -1384,27 +1388,29 @@ def _render_achievement_charts(records: list[dict]) -> None:
                 marker_color=colors,
                 text=[f"{s:.0f}점 · {n}회" for s, n in zip(scores, counts)],
                 textposition="outside",
-                textfont=dict(color=text_color, size=14, family="Malgun Gothic, sans-serif"),
+                textfont=dict(color=text_color, size=FONT_BODY,
+                              family="Malgun Gothic, sans-serif"),
                 hovertemplate="%{y}<br>평균 %{x:.1f}점<extra></extra>",
             )])
             fig.update_layout(
                 title=dict(text="단원별 평균 성취도",
-                           font=dict(color=title_color, size=18,
+                           font=dict(color=title_color, size=FONT_TITLE,
                                      family="Malgun Gothic, sans-serif")),
-                font=dict(color=text_color, size=14,
+                font=dict(color=text_color, size=FONT_BODY,
                           family="Malgun Gothic, sans-serif"),
                 xaxis=dict(
-                    range=[0, 110],
-                    title=dict(text="평균 점수", font=dict(color=axis_color, size=14)),
-                    tickfont=dict(color=axis_color, size=13),
+                    range=[0, 120],
+                    title=dict(text="평균 점수",
+                               font=dict(color=axis_color, size=FONT_BODY)),
+                    tickfont=dict(color=axis_color, size=FONT_TICK),
                     gridcolor=grid_color, zerolinecolor=grid_color,
                 ),
                 yaxis=dict(
                     autorange="reversed",
-                    tickfont=dict(color=axis_color, size=14),
+                    tickfont=dict(color=axis_color, size=FONT_TICK),
                     gridcolor=grid_color,
                 ),
-                height=360, margin=dict(l=10, r=30, t=50, b=30),
+                height=460, margin=dict(l=10, r=40, t=70, b=40),
                 plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -1421,28 +1427,28 @@ def _render_achievement_charts(records: list[dict]) -> None:
                 fill="toself",
                 line=dict(color="#1E40AF", width=2),
                 fillcolor="rgba(59,130,246,0.35)",
-                marker=dict(color="#1E40AF", size=8),
+                marker=dict(color="#1E40AF", size=10),
                 hovertemplate="%{theta}<br>%{r:.0f}점<extra></extra>",
             ))
             fig2.update_layout(
                 title=dict(text="NCS 카테고리별 평균",
-                           font=dict(color=title_color, size=18,
+                           font=dict(color=title_color, size=FONT_TITLE,
                                      family="Malgun Gothic, sans-serif")),
-                font=dict(color=text_color, size=14,
+                font=dict(color=text_color, size=FONT_BODY,
                           family="Malgun Gothic, sans-serif"),
                 polar=dict(
                     bgcolor="#FFFFFF",
                     radialaxis=dict(
                         visible=True, range=[0, 100],
-                        tickfont=dict(color=axis_color, size=12),
+                        tickfont=dict(color=axis_color, size=FONT_RADIAL),
                         gridcolor=grid_color, linecolor=grid_color,
                     ),
                     angularaxis=dict(
-                        tickfont=dict(color=axis_color, size=14),
+                        tickfont=dict(color=axis_color, size=FONT_TICK),
                         gridcolor=grid_color, linecolor=grid_color,
                     ),
                 ),
-                height=360, margin=dict(l=50, r=50, t=50, b=30),
+                height=460, margin=dict(l=70, r=70, t=70, b=40),
                 paper_bgcolor="#FFFFFF",
             )
             st.plotly_chart(fig2, use_container_width=True)
@@ -1614,22 +1620,44 @@ def _render_final_portfolio_section(records: list[dict]) -> None:
 
         with st.container(border=True):
             st.markdown("**단원별 완료 현황**")
-            cols = st.columns(2)
-            for i, unit in enumerate(required_units):
-                icon = UNIT_ICONS.get(unit, "📘")
-                with cols[i % 2]:
-                    if unit in completed_units:
-                        st.markdown(
-                            f"<div style='padding:6px 10px;margin:3px 0;border-radius:8px;"
-                            f"background:#ECFDF5;color:#065F46;'>✅ {icon} {unit}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.markdown(
-                            f"<div style='padding:6px 10px;margin:3px 0;border-radius:8px;"
-                            f"background:#FEF2F2;color:#991B1B;'>⬜ {icon} {unit} <span style='font-size:11px;opacity:0.8;'>(아직 미완료)</span></div>",
-                            unsafe_allow_html=True,
-                        )
+            grid_html = """
+<style>
+.unit-grid {
+    display:grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:12px; margin: 6px 0 4px 0;
+}
+.unit-cell {
+    height: 90px; box-sizing: border-box;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    padding: 8px 14px; border-radius: 12px;
+    text-align: center; font-weight: 700; font-size: 17px;
+    overflow: hidden; word-break: keep-all;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.unit-cell .name { line-height:1.3; }
+.unit-cell .sub { font-size: 13px; font-weight: 500; opacity: 0.85; margin-top: 4px; }
+.unit-done { background:#ECFDF5; color:#065F46; border:1.5px solid #6EE7B7; }
+.unit-todo { background:#FEF2F2; color:#991B1B; border:1.5px solid #FCA5A5; }
+</style>
+<div class="unit-grid">
+"""
+            for unit in required_units:
+                if unit in completed_units:
+                    grid_html += (
+                        '<div class="unit-cell unit-done">'
+                        f'<div class="name">{unit}</div>'
+                        '<div class="sub">완료</div>'
+                        '</div>'
+                    )
+                else:
+                    grid_html += (
+                        '<div class="unit-cell unit-todo">'
+                        f'<div class="name">{unit}</div>'
+                        '<div class="sub">아직 미완료</div>'
+                        '</div>'
+                    )
+            grid_html += "</div>"
+            st.markdown(grid_html, unsafe_allow_html=True)
             st.caption(f"남은 단원 {len(missing_units)}개를 완료하면 PDF 다운로드 버튼이 활성화돼요.")
 
         st.button(
