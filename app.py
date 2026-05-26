@@ -1237,56 +1237,97 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
 
 _PORTFOLIO_CSS = """
 <style>
+/* ── 헤더(히어로) ── */
 .pf-hero {
     background: linear-gradient(135deg,#1E3A8A 0%,#3B82F6 100%);
-    color:#fff; padding:18px 22px; border-radius:14px; margin-bottom:16px;
-    box-shadow:0 4px 14px rgba(30,58,138,0.18);
+    color:#fff; padding:24px 28px; border-radius:18px; margin-bottom:20px;
+    box-shadow:0 6px 18px rgba(30,58,138,0.22);
 }
-.pf-hero h2 { margin:0; font-size:22px; }
-.pf-hero p { margin:4px 0 0 0; opacity:0.92; font-size:14px; }
-.pf-stats { display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
-.pf-stat {
-    background:rgba(255,255,255,0.15); padding:8px 14px; border-radius:10px;
-    backdrop-filter:blur(4px);
-}
-.pf-stat b { font-size:18px; display:block; }
-.pf-stat span { font-size:11px; opacity:0.85; }
+.pf-hero h2 { margin:0; font-size:30px; font-weight:800; letter-spacing:-0.3px; }
+.pf-hero p { margin:8px 0 0 0; opacity:0.92; font-size:16px; }
 
+/* 4개 통계 카드 — 크고 또렷하게 */
+.pf-stats {
+    display:grid; grid-template-columns: repeat(4, 1fr);
+    gap:14px; margin-top:20px;
+}
+.pf-stat {
+    background:rgba(255,255,255,0.18); padding:18px 16px; border-radius:14px;
+    backdrop-filter:blur(4px); position:relative;
+    border:1px solid rgba(255,255,255,0.25);
+}
+.pf-stat b { font-size:34px; display:block; font-weight:800; line-height:1.1; }
+.pf-stat .label { font-size:15px; opacity:0.95; margin-top:6px; display:block; }
+.pf-stat .help-mark {
+    position:absolute; top:8px; right:10px;
+    width:22px; height:22px; border-radius:50%;
+    background:rgba(255,255,255,0.30); color:#fff;
+    font-size:13px; font-weight:700; line-height:22px; text-align:center;
+    cursor:help; user-select:none;
+}
+.pf-stat .help-mark:hover { background:rgba(255,255,255,0.55); color:#1E3A8A; }
+
+/* ── 선생님 피드백 카드 — 글씨 크게 ── */
 .pf-fb-card {
-    background:#FFF7E6; border-left:6px solid #FA8C16;
-    border-radius:10px; padding:14px 18px; margin:8px 0;
-    box-shadow:0 1px 3px rgba(0,0,0,0.04);
+    background:#FFF7E6; border-left:8px solid #FA8C16;
+    border-radius:12px; padding:16px 22px; margin:10px 0;
+    box-shadow:0 1px 4px rgba(0,0,0,0.05);
 }
 .pf-fb-head { display:flex; justify-content:space-between; align-items:center;
-    color:#92400E; font-weight:600; margin-bottom:6px; font-size:14px; }
-.pf-fb-body { color:#5C3300; line-height:1.65; font-size:15px; white-space:pre-wrap; }
+    color:#92400E; font-weight:700; margin-bottom:8px; font-size:18px; }
+.pf-fb-body {
+    color:#3F2200; line-height:1.75; font-size:19px;
+    white-space:pre-wrap; font-weight:500;
+}
 .pf-fb-empty {
     background:#F3F4F6; border:1px dashed #D1D5DB; color:#6B7280;
-    padding:14px; border-radius:10px; text-align:center;
+    padding:16px; border-radius:10px; text-align:center; font-size:16px;
 }
 
+/* ── 실습 기록 카드 ── */
 .pf-record {
-    border:1px solid #E5E7EB; border-radius:12px;
-    padding:14px 16px; margin-bottom:12px; background:#fff;
-    box-shadow:0 1px 2px rgba(0,0,0,0.03);
+    border:1px solid #E5E7EB; border-radius:14px;
+    padding:16px 18px; margin-bottom:14px; background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }
-.pf-rec-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
-.pf-rec-title { font-size:16px; font-weight:700; color:#111827; }
-.pf-rec-date { font-size:12px; color:#6B7280; }
-.pf-chip { display:inline-block; padding:4px 10px; border-radius:999px;
-    font-size:12px; font-weight:600; margin-left:4px; }
+.pf-rec-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.pf-rec-title { font-size:18px; font-weight:700; color:#111827; }
+.pf-rec-date { font-size:13px; color:#6B7280; margin-top:2px; }
+.pf-chip { display:inline-block; padding:5px 12px; border-radius:999px;
+    font-size:13px; font-weight:700; margin-left:4px; }
 .pf-chip-fb { background:#DBEAFE; color:#1D4ED8; }
 .pf-chip-wait { background:#F3F4F6; color:#6B7280; }
 .pf-chip-chance { background:#FEF3C7; color:#92400E; }
 .pf-score {
-    display:inline-block; padding:4px 12px; border-radius:8px;
-    font-weight:700; font-size:13px; color:#fff;
+    display:inline-block; padding:6px 14px; border-radius:10px;
+    font-weight:800; font-size:15px; color:#fff;
 }
+
+/* ── 카테고리 평가 박스(주황/색상) — 글씨 크게, 이모지 제거 ── */
+.pf-cat-grid {
+    display:grid; grid-template-columns: repeat(4, 1fr);
+    gap:10px; margin:14px 0 8px 0;
+}
+.pf-cat-box {
+    border-radius:12px; padding:14px 12px; text-align:center;
+    box-shadow:0 1px 2px rgba(0,0,0,0.05);
+}
+.pf-cat-box .label { font-size:15px; font-weight:700; opacity:0.95; }
+.pf-cat-box .status { font-size:22px; font-weight:800; margin-top:8px; letter-spacing:0.5px; }
+
+/* ── AI 평가 요약 박스 ── */
+.pf-eval-summary {
+    background:linear-gradient(135deg,#EFF6FF 0%,#DBEAFE 100%);
+    border-left:8px solid #2563EB; border-radius:12px;
+    padding:16px 20px; margin:10px 0; color:#1E3A8A;
+}
+.pf-eval-summary .head { font-size:14px; font-weight:700; color:#1D4ED8; margin-bottom:6px; }
+.pf-eval-summary .body { font-size:18px; line-height:1.7; font-weight:600; }
 </style>
 """
 
 def _render_teacher_feedback_section(records: list[dict]) -> None:
-    st.markdown("### 📬 선생님의 피드백")
+    st.markdown("### 선생님의 피드백")
     feedback_recs = [r for r in records if (r.get("teacher_feedback") or "").strip()]
     if not feedback_recs:
         st.markdown(
@@ -1299,33 +1340,37 @@ def _render_teacher_feedback_section(records: list[dict]) -> None:
         key=lambda r: (r.get("teacher_feedback_updated_at") or r.get("submitted_at") or ""),
         reverse=True,
     )
-    for r in feedback_recs[:5]:
+    st.caption(f"총 {len(feedback_recs)}건의 피드백이 도착했어요. (최신순)")
+    for r in feedback_recs:
         unit = r.get("unit", "")
-        icon = UNIT_ICONS.get(unit, "📘")
         when = (r.get("teacher_feedback_updated_at") or r.get("submitted_at") or "")[:16]
         fb = (r.get("teacher_feedback") or "").strip()
         st.markdown(
             f"""
 <div class="pf-fb-card">
   <div class="pf-fb-head">
-    <span>{icon} {unit}</span>
-    <span style="font-weight:400;font-size:12px;color:#9A6B00;">📅 {when}</span>
+    <span>{unit}</span>
+    <span style="font-weight:500;font-size:14px;color:#9A6B00;">{when}</span>
   </div>
   <div class="pf-fb-body">{fb}</div>
 </div>""",
             unsafe_allow_html=True,
         )
-    if len(feedback_recs) > 5:
-        st.caption(f"…외 {len(feedback_recs) - 5}건의 피드백이 더 있어요. 아래 실습 기록에서 확인하세요.")
 
 def _render_achievement_charts(records: list[dict]) -> None:
-    st.markdown("### 📊 분야별 성취도")
+    st.markdown("### 분야별 성취도")
     if go is None:
         st.caption("그래프를 표시하려면 `plotly` 패키지가 필요합니다.")
         return
 
     unit_rows = _aggregate_unit_scores(records)
     cat_avgs = _aggregate_category_scores(records)
+
+    # 모든 차트에 공통 적용할 색상 설정 (흰 배경 위에서 진한 글자)
+    text_color = "#1F2937"   # 본문 회색-검정
+    title_color = "#1E3A8A"  # 진한 남색
+    axis_color = "#374151"   # 진한 회색
+    grid_color = "#E5E7EB"
 
     col1, col2 = st.columns(2)
     with col1:
@@ -1339,14 +1384,28 @@ def _render_achievement_charts(records: list[dict]) -> None:
                 marker_color=colors,
                 text=[f"{s:.0f}점 · {n}회" for s, n in zip(scores, counts)],
                 textposition="outside",
+                textfont=dict(color=text_color, size=14, family="Malgun Gothic, sans-serif"),
                 hovertemplate="%{y}<br>평균 %{x:.1f}점<extra></extra>",
             )])
             fig.update_layout(
-                title="단원별 평균 성취도",
-                xaxis=dict(range=[0, 110], title="평균 점수"),
-                yaxis=dict(autorange="reversed"),
-                height=320, margin=dict(l=10, r=20, t=40, b=20),
-                plot_bgcolor="#FAFAFA", paper_bgcolor="white",
+                title=dict(text="단원별 평균 성취도",
+                           font=dict(color=title_color, size=18,
+                                     family="Malgun Gothic, sans-serif")),
+                font=dict(color=text_color, size=14,
+                          family="Malgun Gothic, sans-serif"),
+                xaxis=dict(
+                    range=[0, 110],
+                    title=dict(text="평균 점수", font=dict(color=axis_color, size=14)),
+                    tickfont=dict(color=axis_color, size=13),
+                    gridcolor=grid_color, zerolinecolor=grid_color,
+                ),
+                yaxis=dict(
+                    autorange="reversed",
+                    tickfont=dict(color=axis_color, size=14),
+                    gridcolor=grid_color,
+                ),
+                height=360, margin=dict(l=10, r=30, t=50, b=30),
+                plot_bgcolor="#FFFFFF", paper_bgcolor="#FFFFFF",
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -1354,25 +1413,62 @@ def _render_achievement_charts(records: list[dict]) -> None:
 
     with col2:
         if any(cat_avgs.values()):
-            labels = [f"{ico} {lab}" for ico, lab in _CATEGORY_LABELS]
+            labels = [lab for _ico, lab in _CATEGORY_LABELS]
             vals = [cat_avgs[lab] for _ico, lab in _CATEGORY_LABELS]
             fig2 = go.Figure(data=go.Scatterpolar(
                 r=vals + [vals[0]],
                 theta=labels + [labels[0]],
                 fill="toself",
-                line_color="#1E40AF",
+                line=dict(color="#1E40AF", width=2),
                 fillcolor="rgba(59,130,246,0.35)",
+                marker=dict(color="#1E40AF", size=8),
                 hovertemplate="%{theta}<br>%{r:.0f}점<extra></extra>",
             ))
             fig2.update_layout(
-                title="NCS 카테고리별 평균",
-                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                height=320, margin=dict(l=40, r=40, t=40, b=20),
-                paper_bgcolor="white",
+                title=dict(text="NCS 카테고리별 평균",
+                           font=dict(color=title_color, size=18,
+                                     family="Malgun Gothic, sans-serif")),
+                font=dict(color=text_color, size=14,
+                          family="Malgun Gothic, sans-serif"),
+                polar=dict(
+                    bgcolor="#FFFFFF",
+                    radialaxis=dict(
+                        visible=True, range=[0, 100],
+                        tickfont=dict(color=axis_color, size=12),
+                        gridcolor=grid_color, linecolor=grid_color,
+                    ),
+                    angularaxis=dict(
+                        tickfont=dict(color=axis_color, size=14),
+                        gridcolor=grid_color, linecolor=grid_color,
+                    ),
+                ),
+                height=360, margin=dict(l=50, r=50, t=50, b=30),
+                paper_bgcolor="#FFFFFF",
             )
             st.plotly_chart(fig2, use_container_width=True)
         else:
             st.info("AI 평가 결과에 카테고리 정보가 누적되면 레이더 차트가 표시돼요.")
+
+def _extract_evaluation_only(result_text: str) -> str:
+    """`_compose_combined_result`로 합쳐진 텍스트에서 AI 실습 평가 부분만 추출."""
+    if not result_text:
+        return ""
+    # 평가 마커 이후만 사용
+    m = re.search(r"##\s*[^\n]*?(AI 실습 평가|실습 평가|평가)\s*\n+", result_text)
+    if m:
+        return result_text[m.end():].strip()
+    return result_text.strip()
+
+def _parse_evaluation_summary(evaluation_text: str) -> dict:
+    """평가 텍스트에서 한줄 요약·카테고리 상태를 추출."""
+    text = evaluation_text or ""
+    summary = ""
+    m = re.search(r"평가\s*한줄\s*요약[:：]?\s*(.+)", text)
+    if m:
+        summary = m.group(1).strip()
+        # 다음 헤더까지만
+        summary = re.split(r"\n\s*##|\n\s*###", summary, maxsplit=1)[0].strip()
+    return {"summary": summary}
 
 def _parse_ai_chance_steps(rec: dict) -> list[int]:
     """기록에서 AI 찬스 사용 단계 번호 목록을 안전하게 파싱."""
@@ -1391,18 +1487,17 @@ def _parse_ai_chance_steps(rec: dict) -> list[int]:
 
 def _render_record_card(rec: dict) -> None:
     unit = rec.get("unit", "")
-    icon = UNIT_ICONS.get(unit, "📘")
     date = (rec.get("submitted_at") or "")[:10]
     score = _safe_float(rec.get("ncs_score"))
     color = _score_color(score)
     band = _score_band(score)
     has_fb = bool((rec.get("teacher_feedback") or "").strip())
-    fb_chip = ('<span class="pf-chip pf-chip-fb">📬 피드백 도착</span>'
+    fb_chip = ('<span class="pf-chip pf-chip-fb">피드백 도착</span>'
                if has_fb else
-               '<span class="pf-chip pf-chip-wait">⏳ 피드백 대기</span>')
+               '<span class="pf-chip pf-chip-wait">피드백 대기</span>')
     chance_steps = _parse_ai_chance_steps(rec)
     chance_chip = (
-        f'<span class="pf-chip pf-chip-chance">🆘 AI 찬스 {len(chance_steps)}회 사용 (감점)</span>'
+        f'<span class="pf-chip pf-chip-chance">AI 찬스 {len(chance_steps)}회 · 감점</span>'
         if chance_steps else ""
     )
 
@@ -1412,8 +1507,8 @@ def _render_record_card(rec: dict) -> None:
 <div class="pf-record">
   <div class="pf-rec-head">
     <div>
-      <div class="pf-rec-title">{icon} {unit}</div>
-      <div class="pf-rec-date">📅 {date}</div>
+      <div class="pf-rec-title">{unit}</div>
+      <div class="pf-rec-date">{date}</div>
     </div>
     <div style="text-align:right;">
       <div class="pf-score" style="background:{color};">{score:.0f}점 · {band}</div>
@@ -1428,7 +1523,7 @@ def _render_record_card(rec: dict) -> None:
                 st.markdown(
                     f"""
 <div class="pf-fb-card">
-  <div class="pf-fb-head"><span>🎯 선생님 피드백</span></div>
+  <div class="pf-fb-head"><span>선생님 피드백</span></div>
   <div class="pf-fb-body">{(rec.get('teacher_feedback') or '').strip()}</div>
 </div>""",
                     unsafe_allow_html=True,
@@ -1438,39 +1533,55 @@ def _render_record_card(rec: dict) -> None:
                 steps_str = ", ".join(f"{n}단계" for n in chance_steps)
                 st.markdown(
                     f"""
-<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
-            padding:10px 14px;margin:8px 0;color:#78350F;font-weight:600;">
-  🆘 이 실습에서 AI 찬스 사용 단계: <b>{steps_str}</b> (총 {len(chance_steps)}회, 감점 적용됨)
+<div style="background:#FFFBEB;border-left:6px solid #D97706;border-radius:12px;
+            padding:14px 18px;margin:10px 0;color:#78350F;font-weight:600;font-size:16px;">
+  이 실습에서 AI 찬스 사용 단계: <b>{steps_str}</b> (총 {len(chance_steps)}회, 감점 적용됨)
 </div>""",
                     unsafe_allow_html=True,
                 )
 
+            # ── 4분면 카테고리 평가 카드 (이모지 제거, 글씨 크게) ──
             cat_scores = _parse_category_scores(rec.get("result", ""))
             if any(cat_scores.values()):
-                cols = st.columns(len(_CATEGORY_LABELS))
-                for (ico, label), c in zip(_CATEGORY_LABELS, cols):
+                box_html = '<div class="pf-cat-grid">'
+                for _ico, label in _CATEGORY_LABELS:
                     sc = cat_scores.get(label, 0)
-                    with c:
-                        st.markdown(
-                            f"""
-<div style="background:{_score_color(sc) if sc else '#F3F4F6'}; color:{'#fff' if sc else '#9CA3AF'};
-            padding:10px; border-radius:10px; text-align:center;">
-  <div style="font-size:18px;">{ico}</div>
-  <div style="font-size:11px; opacity:0.9;">{label}</div>
-  <div style="font-weight:700; font-size:14px; margin-top:2px;">
-    {'통과' if sc >= 100 else ('보완' if sc >= 60 else '미평가')}
-  </div>
-</div>""",
-                            unsafe_allow_html=True,
-                        )
-                st.markdown("")
+                    bg = _score_color(sc) if sc else "#F3F4F6"
+                    fg = "#FFFFFF" if sc else "#9CA3AF"
+                    status_text = (
+                        "통과" if sc >= 100 else ("보완 필요" if sc >= 60 else "미평가")
+                    )
+                    box_html += (
+                        f'<div class="pf-cat-box" style="background:{bg};color:{fg};">'
+                        f'<div class="label">{label}</div>'
+                        f'<div class="status">{status_text}</div>'
+                        '</div>'
+                    )
+                box_html += "</div>"
+                st.markdown(box_html, unsafe_allow_html=True)
 
-            tab1, tab2, tab3 = st.tabs(["🔍 수행 내용", "📝 나의 소감", "🤖 AI 평가"])
+            # ── AI 평가 한줄 요약 (간결·직관) ──
+            eval_only = _extract_evaluation_only(rec.get("result", ""))
+            summary_info = _parse_evaluation_summary(eval_only)
+            summary = summary_info.get("summary") or ""
+            if summary:
+                st.markdown(
+                    f"""
+<div class="pf-eval-summary">
+  <div class="head">AI 평가 한줄 요약</div>
+  <div class="body">{summary}</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+
+            # ── 탭(이모지 제거) ──
+            tab1, tab2, tab3 = st.tabs(["수행 내용", "나의 소감", "AI 평가 원문"])
             with tab1:
                 if rec.get("symptom"):
-                    st.markdown(f"```\n{rec.get('symptom')}\n```")
+                    st.markdown("**입력한 증상**")
+                    st.code(rec.get("symptom"), language=None)
                 if rec.get("reasoning"):
-                    st.markdown(f"**내가 작성한 진단**")
+                    st.markdown("**내가 작성한 진단**")
                     st.write(rec.get("reasoning"))
                 img_bytes = thumbnail_b64_to_bytes(rec.get("image_b64"))
                 if img_bytes:
@@ -1479,12 +1590,14 @@ def _render_record_card(rec: dict) -> None:
                 refl = rec.get("reflection") or "(소감 없음)"
                 st.info(refl)
             with tab3:
-                res = rec.get("result") or "(AI 평가 없음)"
-                st.markdown(res)
+                if eval_only:
+                    st.markdown(eval_only)
+                else:
+                    st.caption("AI 평가 원문이 없습니다.")
 
 def _render_final_portfolio_section(records: list[dict]) -> None:
     """학기말 최종 포트폴리오 다운로드 영역. 6개 단원을 모두 완료해야 활성화된다."""
-    st.markdown("### 🎓 학기말 최종 포트폴리오")
+    st.markdown("### 학기말 최종 포트폴리오")
 
     completed_units = {(r.get("unit") or "").strip() for r in records if r.get("unit")}
     required_units = list(NCS_UNITS)
@@ -1565,13 +1678,25 @@ def _render_portfolio_view():
     st.markdown(
         f"""
 <div class="pf-hero">
-  <h2>📓 {name} 학생의 성장 일지</h2>
+  <h2>{name} 학생의 성장 일지</h2>
   <p>그동안의 자동차 전기전자제어 실습 기록을 한눈에 확인해 보세요.</p>
   <div class="pf-stats">
-    <div class="pf-stat"><b>{len(records)}</b><span>총 실습 건수</span></div>
-    <div class="pf-stat"><b>{avg_score:.1f}</b><span>평균 성취도</span></div>
-    <div class="pf-stat"><b>{unit_count}</b><span>참여 단원 수</span></div>
-    <div class="pf-stat"><b>{fb_count}</b><span>받은 피드백</span></div>
+    <div class="pf-stat" title="지금까지 완료한 수행평가(실습)의 총 횟수입니다.">
+      <span class="help-mark" title="지금까지 완료한 수행평가(실습)의 총 횟수입니다.">?</span>
+      <b>{len(records)}</b><span class="label">총 실습 건수</span>
+    </div>
+    <div class="pf-stat" title="모든 실습의 NCS 평가 점수를 평균낸 값입니다. 100점 만점.">
+      <span class="help-mark" title="모든 실습의 NCS 평가 점수를 평균낸 값입니다. 100점 만점.">?</span>
+      <b>{avg_score:.1f}</b><span class="label">평균 성취도</span>
+    </div>
+    <div class="pf-stat" title="6개 NCS 단원 중 한 번이라도 실습을 완료한 단원 수입니다.">
+      <span class="help-mark" title="6개 NCS 단원 중 한 번이라도 실습을 완료한 단원 수입니다.">?</span>
+      <b>{unit_count}</b><span class="label">참여 단원 수</span>
+    </div>
+    <div class="pf-stat" title="선생님이 내 실습 기록에 남겨주신 피드백의 누적 개수입니다.">
+      <span class="help-mark" title="선생님이 내 실습 기록에 남겨주신 피드백의 누적 개수입니다.">?</span>
+      <b>{fb_count}</b><span class="label">받은 피드백</span>
+    </div>
   </div>
 </div>""",
         unsafe_allow_html=True,
@@ -1590,7 +1715,7 @@ def _render_portfolio_view():
 
     st.markdown("---")
     # ── ③ 실습 기록 카드 목록 ─────────────────────────
-    st.markdown("### 📚 실습 기록")
+    st.markdown("### 실습 기록")
     sort_opt = st.radio(
         "정렬", ["최신순", "성취도 높은 순", "단원별"],
         horizontal=True, label_visibility="collapsed", key="pf_sort",
