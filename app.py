@@ -119,10 +119,11 @@ UNIT_PHOTO_CHECKLISTS = {
 
 GEMINI_MODEL_CANDIDATES = [
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
     "gemini-2.0-flash",
     "gemini-2.0-flash-001",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash",
+    "gemini-2.0-flash-exp",
 ]
 GEMINI_RETRY_DELAYS_SECONDS = [2.0, 4.0]
 GEMINI_IMAGE_MAX_SIZE = (1024, 1024)
@@ -305,46 +306,88 @@ def _compose_combined_result(guidance_text: str, evaluation_text: str) -> str:
         return f"## 🧭 AI 진단 가이드\n\n{g}\n\n---\n\n## 📝 AI 실습 평가\n\n{e}"
     return e or g
 
+_STEP_FOCUS_BY_INDEX = {
+    1: "안전·전원 차단·보호구·정비지침서·도구 준비",
+    2: "회로도 분석·전원→퓨즈→스위치→부하→접지 흐름·커넥터/하네스 추적",
+    3: "멀티미터/오실로스코프/스캐너 측정 절차·측정 위치·정상 기준값",
+    4: "측정값 해석·정상/이상 판정·다음 점검 방향 결정",
+}
+
 def build_step_help_prompt(
     user_symptom: str, selected_unit: str, step_idx: int,
-    step_title: str, step_body: str,
+    step_title: str, step_body: str, student_step_note: str = "",
 ) -> str:
-    """AI 찬스: 특정 단계에 대해 더 구체적인 힌트를 주되 정답은 금지."""
+    """
+    AI 찬스: 학생이 막혀 있을 때 NCS 능력단위·하위 수행준거를 바탕으로
+    이 단계에서 어떻게 측정·진단·정비해야 하는지 더 구체적으로 도와주는 코칭 프롬프트.
+    정답·고장 원인 단정은 여전히 금지하되, 측정 절차·기준값·관찰 포인트는 풍부하게 제공한다.
+    """
+    sub_elements = NCS_RUBRIC.get(selected_unit, [])
+    sub_lines = []
+    for i, (name, keywords) in enumerate(sub_elements, 1):
+        kw = ", ".join(keywords[:8])
+        sub_lines.append(f"  {i}. {name} — {kw}")
+    sub_text = "\n".join(sub_lines) or "  (세부 수행준거 없음)"
+    step_focus = _STEP_FOCUS_BY_INDEX.get(step_idx, "")
+
     return f"""
 너는 '자동차 전기전자제어' NCS 기반 AI 코치다.
-지금 학생이 [{step_idx}단계 · {step_title}]에서 막혀 있어 더 자세한 도움을 요청했다.
+학생이 [{step_idx}단계 · {step_title}]에서 진행이 더디다고 판단해 **AI 찬스(심화 도움)**를 요청했다.
+이 도움은 NCS 능력단위·하위 수행준거에 입각해 **어떻게 측정·진단·정비해야 하는지**를
+구체적으로, 그러나 정답을 단정하지는 않는 형태로 제공한다.
 
-[규칙]
-- 정답·고장 원인을 절대 단정하지 말 것. (예: "이건 배터리 불량입니다" 금지)
-- 학생이 다음에 무엇을 시도해봐야 하는지, 어떻게 측정·관찰·비교해야 하는지만 안내.
-- 한 줄당 30자 이내, 짧고 직관적인 동사구 위주.
-- 총 5~7줄, 불릿(•)만 사용.
-- 마지막 줄은 "✋ 다음에 직접 답해봐: ..." 형태로 학생 스스로 답해야 할 핵심 질문 1줄.
-- 측정값을 다룬다면 정상 기준값을 괄호로 함께 표기 (예: 12.6V 이상 정상).
+[NCS 능력단위] {selected_unit}
+[NCS 하위 수행준거]
+{sub_text}
+[현재 단계 핵심 영역] {step_focus}
 
-[학생이 처음 입력한 내용]
+[학생이 처음 입력한 증상]
 {user_symptom or '(미입력)'}
 
-[단원] {selected_unit}
-
-[현재 단계 AI 안내 원문]
+[이 단계의 기존 가이드 원문]
 {step_body or '(원문 없음)'}
 
-위 정보를 바탕으로 이 단계만을 위한 **추가 힌트**를 다음 형식으로 출력:
+[학생이 이 단계에서 적어둔 진행 메모]
+{student_step_note or '(메모 없음)'}
 
-🆘 AI 찬스 — {step_idx}단계 추가 힌트
-• ...
-• ...
-• ...
-• ...
-✋ 다음에 직접 답해봐: ...
+[필수 규칙]
+1. 정답·고장 원인을 단정하지 말 것. (예: "이건 배터리 불량입니다" 금지)
+2. 대신 학생이 직접 측정·관찰·비교해야 할 **구체 절차와 기준값**을 풍부하게 제시.
+3. 측정 항목마다 가능한 한 **정상 기준값/범위**를 괄호로 함께 적기.
+   - 예: OCV 12.6V 이상 정상, 충전 전압 13.8~14.9V, 전압강하 0.2V 이하, 종단저항 약 60Ω 등.
+4. 단계 핵심 영역에 어긋나는 내용(예: 1단계인데 측정 절차 위주)은 쓰지 말 것.
+5. 학생이 진행 메모를 적어두었다면 그 내용에 응답하여 다음 행동을 안내할 것.
+6. 결과 해석이 두 갈래로 갈리면 "이러면 정상 / 이러면 의심" 형태로 안내.
+7. 글은 짧고 직관적으로. 한 줄 35자 이내. 줄글·장황한 설명문 금지.
+
+[출력 형식 — 정확히 다음 4블록만 출력]
+
+## 🆘 AI 찬스 — {step_idx}단계 심화 도움
+
+### 🔧 무엇을 어떻게
+• (가장 먼저 할 행동 1줄)
+• (어떤 도구로 어떻게 1줄)
+• (보조적으로 확인할 부분 1줄)
+
+### 📏 측정 / 관찰 포인트와 기준값
+• (측정 위치 또는 관찰 부위 — 정상 기준값 1줄)
+• (또 다른 측정 위치 — 정상 기준값 1줄)
+• (필요시 추가 포인트 — 정상 기준값 1줄)
+
+### 🚦 결과 해석 갈림길
+• ✅ 정상이면: (다음에 해야 할 행동 1줄)
+• ⚠ 의심되면: (어디를 더 살펴볼지 1줄)
+
+### ✋ 학생이 스스로 답해야 할 질문
+• (이 단계 핵심을 스스로 정리하게 만드는 1줄 질문)
 """.strip()
 
 def ask_gemini_step_help(
     user_symptom: str, selected_unit: str, step_idx: int,
     step_title: str, step_body: str, key: str,
+    student_step_note: str = "",
 ) -> str:
-    """AI 찬스 호출. 실패 시 ask_gemini와 동일한 에러 메시지 규약을 사용."""
+    """AI 찬스 호출. 실패한 모델은 모두 누적 기록해 학생/교사가 원인을 파악할 수 있게 한다."""
     if genai is None or types is None:
         return "❌ google-genai 패키지를 불러오지 못했습니다."
     if not (key and str(key).strip()):
@@ -353,9 +396,12 @@ def ask_gemini_step_help(
         client = genai.Client(api_key=str(key).strip())
     except Exception as e:
         return f"❌ Gemini 클라이언트 초기화 실패: {type(e).__name__}: {e}"
-    prompt = build_step_help_prompt(user_symptom, selected_unit, step_idx, step_title, step_body)
+
+    prompt = build_step_help_prompt(
+        user_symptom, selected_unit, step_idx, step_title, step_body, student_step_note,
+    )
     parts = [types.Part.from_text(text=prompt)]
-    last_error = "(원인 미상)"
+    error_log: list[str] = []
     for model_name in GEMINI_MODEL_CANDIDATES:
         try:
             response = client.models.generate_content(
@@ -364,13 +410,21 @@ def ask_gemini_step_help(
             )
             text = (getattr(response, "text", None) or "").strip()
             if text:
+                logger.info("AI 찬스 성공: model=%s, chars=%d", model_name, len(text))
                 return text
-            last_error = "응답이 비어있음"
+            error_log.append(f"{model_name}: 응답이 비어있음")
         except Exception as e:
-            last_error = f"{type(e).__name__}: {e}"
-            logger.error("AI 찬스 호출 에러 (%s): %s", model_name, e)
+            msg = f"{model_name}: {type(e).__name__}: {e}"
+            error_log.append(msg)
+            logger.error("AI 찬스 호출 에러 — %s", msg)
             continue
-    return f"❌ AI 찬스 응답 실패: {last_error}"
+
+    return (
+        "❌ AI 찬스 응답 실패\n\n"
+        "사용 가능한 Gemini 모델을 찾지 못했습니다. 잠시 후 다시 시도하거나 선생님께 문의하세요.\n\n"
+        "[시도한 모델별 오류]\n"
+        + "\n".join(f"• {m}" for m in error_log)
+    )
 
 def _detect_image_mime(image_file: Any) -> str:
     """Streamlit file_uploader의 UploadedFile에서 mime 타입을 안전하게 추출."""
@@ -858,10 +912,11 @@ def _ai_chance_dialog(step_idx: int, selected_unit: str, step_title: str, step_b
     c1, c2 = st.columns([3, 2])
     with c1:
         if st.button("✅ 예, 사용할게요", use_container_width=True, key=f"chance_yes_{step_idx}"):
-            with st.spinner("AI가 추가 힌트를 작성 중..."):
+            with st.spinner("AI가 NCS 기반 심화 도움을 작성 중..."):
                 advice = ask_gemini_step_help(
                     st.session_state.get("latest_symptom", ""),
                     selected_unit, step_idx, step_title, step_body, api_key,
+                    student_step_note=(st.session_state.get(f"step_note_{step_idx}") or ""),
                 )
             if (not advice) or advice.lstrip().startswith("❌"):
                 st.error(advice or "AI 찬스 응답을 받지 못했습니다.")
