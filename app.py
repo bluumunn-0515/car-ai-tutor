@@ -117,7 +117,13 @@ UNIT_PHOTO_CHECKLISTS = {
     "시동·충전장치 점검": ["솔레노이드 단자 위치가 보이나요?", "벨트 장력 상태가 보이나요?"],
 }
 
-GEMINI_MODEL_CANDIDATES = ["gemini-2.0-flash", "gemini-1.5-flash"]
+GEMINI_MODEL_CANDIDATES = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash",
+]
 GEMINI_RETRY_DELAYS_SECONDS = [2.0, 4.0]
 GEMINI_IMAGE_MAX_SIZE = (1024, 1024)
 GEMINI_IMAGE_JPEG_QUALITY = 85
@@ -262,22 +268,91 @@ def build_evaluation_prompt(user_symptom: str, student_reasoning: str, selected_
 • 🛠️ 판정 / 조치 — [✅ 통과/⚠ 보완] | ...
 """
 
-def ask_gemini(user_symptom: str, student_reasoning: str, image_file: Any, key: str, selected_unit: str, step: str, guidance_text: str = "") -> str:
-    client = genai.Client(api_key=key)
-    prompt = build_evaluation_prompt(user_symptom, student_reasoning, selected_unit, guidance_text) if step == "evaluation" else build_learning_prompt(user_symptom, selected_unit)
-    
-    parts = [types.Part.from_text(text=prompt)]
-    if image_file:
-        parts.append(types.Part.from_bytes(data=image_file.getvalue(), mime_type="image/jpeg"))
-        
+def _compose_combined_result(guidance_text: str, evaluation_text: str) -> str:
+    """가이드 텍스트와 평가 텍스트를 학생 포트폴리오·교사 대시보드에서 사용하기 좋은 형태로 합친다."""
+    g = (guidance_text or "").strip()
+    e = (evaluation_text or "").strip()
+    if g and e:
+        return f"## 🧭 AI 진단 가이드\n\n{g}\n\n---\n\n## 📝 AI 실습 평가\n\n{e}"
+    return e or g
+
+def _detect_image_mime(image_file: Any) -> str:
+    """Streamlit file_uploader의 UploadedFile에서 mime 타입을 안전하게 추출."""
+    mime = (getattr(image_file, "type", None) or "").strip().lower()
+    if mime in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
+        if mime == "image/jpg":
+            return "image/jpeg"
+        return mime
+    # 이름으로 추정
+    name = (getattr(image_file, "name", None) or "").lower()
+    if name.endswith(".png"):
+        return "image/png"
+    if name.endswith(".webp"):
+        return "image/webp"
+    return "image/jpeg"
+
+def ask_gemini(
+    user_symptom: str,
+    student_reasoning: str,
+    image_file: Any,
+    key: str,
+    selected_unit: str,
+    step: str,
+    guidance_text: str = "",
+) -> str:
+    """Gemini API 호출. 실패 사유를 사람이 읽을 수 있는 형식으로 반환한다."""
+    if genai is None or types is None:
+        return ("❌ `google-genai` 패키지를 불러오지 못했습니다.\n"
+                "requirements.txt에 `google-genai`가 있는지 확인하고 다시 배포해 주세요.")
+    if not (key and str(key).strip()):
+        return ("❌ Gemini API 키가 설정되어 있지 않습니다.\n"
+                "`.streamlit/secrets.toml`의 `GEMINI_API_KEY`를 확인해 주세요.")
+
+    try:
+        client = genai.Client(api_key=str(key).strip())
+    except Exception as e:
+        logger.exception("Gemini Client 초기화 실패")
+        return f"❌ Gemini 클라이언트 초기화 실패: {type(e).__name__}: {e}"
+
+    if step == "evaluation":
+        prompt = build_evaluation_prompt(user_symptom, student_reasoning, selected_unit, guidance_text)
+    else:
+        prompt = build_learning_prompt(user_symptom, selected_unit)
+
+    parts: list[Any] = [types.Part.from_text(text=prompt)]
+    if image_file is not None:
+        try:
+            raw = image_file.getvalue() if hasattr(image_file, "getvalue") else image_file.read()
+            if raw:
+                mime = _detect_image_mime(image_file)
+                parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
+        except Exception as e:
+            logger.warning("이미지 첨부 실패(텍스트만 진행): %s", e)
+
+    last_error = "(원인 미상)"
     for model_name in GEMINI_MODEL_CANDIDATES:
         try:
-            response = client.models.generate_content(model=model_name, contents=[types.Content(role="user", parts=parts)])
-            return response.text
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[types.Content(role="user", parts=parts)],
+            )
+            text = (getattr(response, "text", None) or "").strip()
+            if text:
+                logger.info("Gemini 호출 성공: model=%s, chars=%d", model_name, len(text))
+                return text
+            last_error = "응답이 비어있음"
+            logger.warning("Gemini 빈 응답: model=%s", model_name)
         except Exception as e:
-            logger.error(f"AI 호출 에러 ({model_name}): {e}")
+            last_error = f"{type(e).__name__}: {e}"
+            logger.error("AI 호출 에러 (%s): %s", model_name, e)
             continue
-    return "AI 응답을 가져오지 못했습니다."
+
+    return (
+        "❌ AI 응답을 가져오지 못했습니다.\n\n"
+        f"마지막 오류: `{last_error}`\n\n"
+        "- 잠시 후 다시 시도해 주세요.\n"
+        "- API 키 사용량/권한 문제일 수 있어요. 선생님께 문의하세요."
+    )
 
 # ───────────────────────────────────────────────────────────────────────────
 # PDF 생성 로직 (수평 공간 부족 오류 해결 버전)
@@ -671,13 +746,24 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
             st.markdown("")
             if st.button("🚀 AI 가이드 받기", type="primary", use_container_width=True):
                 symptom = compose_structured_symptom(t, s, q)
-                with st.spinner("가이드 생성 중..."):
-                    guide = ask_gemini(symptom, "", img, api_key, selected_unit, "guidance")
-                    st.session_state.latest_guidance = guide
-                    st.session_state.latest_symptom = symptom
-                    st.session_state.latest_image_b64 = make_thumbnail_b64(img)
-                    st.session_state.diag_step = "guidance"
-                    st.rerun()
+                if not symptom.strip():
+                    st.warning("⚠ 대상 부품·현재 상태·학습 질문 중 하나 이상은 입력해 주세요.")
+                elif not api_key:
+                    st.error(
+                        "❌ Gemini API 키가 설정되어 있지 않습니다.\n\n"
+                        "`.streamlit/secrets.toml`에 `GEMINI_API_KEY` 항목을 추가하고 앱을 다시 실행해 주세요."
+                    )
+                else:
+                    with st.spinner("🤖 AI가 NCS 기반 가이드를 작성 중이에요..."):
+                        guide = ask_gemini(symptom, "", img, api_key, selected_unit, "guidance")
+                    if (not guide) or guide.lstrip().startswith("❌"):
+                        st.error(guide or "AI 응답을 받지 못했습니다.")
+                    else:
+                        st.session_state.latest_guidance = guide
+                        st.session_state.latest_symptom = symptom
+                        st.session_state.latest_image_b64 = make_thumbnail_b64(img)
+                        st.session_state.diag_step = "guidance"
+                        st.rerun()
 
     elif diag_step == "guidance":
         render_mission_card(st.session_state.latest_guidance)
@@ -685,32 +771,47 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
         res = st.text_area("🧪 실습 수행 결과 입력", height=200)
         refl = st.text_area("📝 오늘의 실습 소감", placeholder="실습을 통해 느낀 점을 적어주세요.")
         
-        if st.button("✅ 결과 제출 및 평가받기"):
-            with st.spinner("평가 분석 중..."):
-                eval_res = ask_gemini(st.session_state.latest_symptom, res, None, api_key, selected_unit, "evaluation", st.session_state.latest_guidance)
-                
-                record = {
-                    "record_id": str(uuid.uuid4()),
-                    "submitted_at": now_kst_display(),
-                    "student_id": st.session_state.student_id,
-                    "student_display_name": st.session_state.student_display_name,
-                    "subject": "자동차 전기전자제어",
-                    "unit": selected_unit,
-                    "mode": "학습 모드",
-                    "symptom": st.session_state.latest_symptom,
-                    "reasoning": res,
-                    "result": shb.compose_combined_result(st.session_state.latest_guidance, eval_res),
-                    "reflection": refl,
-                    "image_b64": st.session_state.latest_image_b64,
-                    "teacher_feedback": "",
-                    "teacher_feedback_updated_at": ""
-                }
-                shb.append_history_from_record(record, 80.0) # 80.0은 임시 점수
-                st.session_state.latest_evaluation = eval_res
-                st.session_state.diag_step = "result"
-                shb.invalidate_all_sheet_caches()
-                st.session_state["my_history_records"] = shb.filter_history_records_by_student(st.session_state.student_id)
-                st.rerun()
+        if st.button("✅ 결과 제출 및 평가받기", type="primary", use_container_width=True):
+            if not (res or "").strip():
+                st.warning("⚠ 실습 수행 결과를 한 줄이라도 입력해 주세요.")
+            elif not api_key:
+                st.error("❌ Gemini API 키가 설정되어 있지 않습니다. 선생님께 문의해 주세요.")
+            else:
+                with st.spinner("🤖 AI가 실습 결과를 평가 중이에요..."):
+                    eval_res = ask_gemini(
+                        st.session_state.latest_symptom, res, None,
+                        api_key, selected_unit, "evaluation",
+                        st.session_state.latest_guidance,
+                    )
+                if (not eval_res) or eval_res.lstrip().startswith("❌"):
+                    st.error(eval_res or "AI 평가 응답을 받지 못했습니다.")
+                else:
+                    record = {
+                        "record_id": str(uuid.uuid4()),
+                        "submitted_at": now_kst_display(),
+                        "student_id": st.session_state.student_id,
+                        "student_display_name": st.session_state.student_display_name,
+                        "subject": "자동차 전기전자제어",
+                        "unit": selected_unit,
+                        "mode": "학습 모드",
+                        "symptom": st.session_state.latest_symptom,
+                        "reasoning": res,
+                        "result": _compose_combined_result(st.session_state.latest_guidance, eval_res),
+                        "reflection": refl,
+                        "image_b64": st.session_state.latest_image_b64,
+                        "teacher_feedback": "",
+                        "teacher_feedback_updated_at": "",
+                    }
+                    try:
+                        shb.append_history_from_record(record, 80.0)
+                        shb.invalidate_all_sheet_caches()
+                        st.session_state["my_history_records"] = shb.filter_history_records_by_student(st.session_state.student_id)
+                    except Exception as _save_e:
+                        logger.exception("history 저장 실패: %s", _save_e)
+                        st.warning(f"기록 저장에 실패했어요(평가는 정상): {_save_e}")
+                    st.session_state.latest_evaluation = eval_res
+                    st.session_state.diag_step = "result"
+                    st.rerun()
 
     elif diag_step == "result":
         st.success("🎉 실습이 완료되었습니다!")
