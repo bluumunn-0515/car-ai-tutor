@@ -710,7 +710,13 @@ _MISSION_STEPS_CSS = """
     border-left: 8px solid var(--step-color, #3B82F6);
     background: #FFFFFF; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
-.mission-card h4 { margin: 0 0 6px 0; font-size: 1.4rem; }
+.mission-card h4.mission-title {
+    margin: 0 0 8px 0;
+    font-size: 1.5rem;
+    color: #1D4ED8 !important;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+}
 .mission-card .body { line-height: 1.7; font-size: 1.1rem; color: #1F2937; }
 .mission-card .reflect {
     margin-top: 8px; padding: 8px 12px; border-radius: 8px;
@@ -771,7 +777,7 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
         st.markdown(
             f"""
 <div class="mission-card" style="--step-color:{meta['color']};">
-  <h4>{status} {meta['emoji']} {i}단계 · {meta['title']}</h4>
+  <h4 class="mission-title">{i}단계 · {meta['title']}</h4>
   <div class="body">{body_block}</div>
   {reflect_block}
 </div>
