@@ -812,6 +812,39 @@ _MISSION_STEPS_CSS = """
     background:#FEF3C7; color:#92400E; font-weight:700; font-size:12px;
     margin-left:6px;
 }
+
+/* AI 찬스 관련 버튼들 — 옅은 하늘색 톤 + 한 줄 표시 (텍스트 잘림 방지) */
+div[class*="st-key-open_chance_"] .stButton button,
+div[class*="st-key-chance_yes_"]   .stButton button,
+div[class*="st-key-chance_no_"]    .stButton button {
+    background: linear-gradient(180deg, #DBEAFE 0%, #BFDBFE 100%) !important;
+    color: #1E3A8A !important;
+    border: 1.5px solid #60A5FA !important;
+    font-weight: 700 !important;
+    font-size: 1.15rem !important;
+    padding: 12px 18px !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 10px rgba(96,165,250,0.20) !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    min-width: max-content !important;
+}
+div[class*="st-key-open_chance_"] .stButton button:hover,
+div[class*="st-key-chance_yes_"]   .stButton button:hover,
+div[class*="st-key-chance_no_"]    .stButton button:hover {
+    background: linear-gradient(180deg, #BFDBFE 0%, #93C5FD 100%) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(59,130,246,0.30) !important;
+}
+
+/* 다이얼로그 내부의 모든 버튼 텍스트도 줄바꿈 금지(긴 한국어 라벨 잘림 방지) */
+div[role="dialog"] .stButton button,
+div[data-testid="stModal"] .stButton button {
+    white-space: nowrap !important;
+    overflow: visible !important;
+    min-width: max-content !important;
+}
+
 </style>
 """
 
@@ -822,9 +855,9 @@ def _ai_chance_dialog(step_idx: int, selected_unit: str, step_title: str, step_b
         "그래도 진행하시겠습니까?"
     )
     st.caption(f"대상 단계: **{step_idx}단계 · {step_title}**")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([3, 2])
     with c1:
-        if st.button("✅ 예, AI 찬스 사용하기", type="primary", use_container_width=True, key=f"chance_yes_{step_idx}"):
+        if st.button("✅ 예, 사용할게요", use_container_width=True, key=f"chance_yes_{step_idx}"):
             with st.spinner("AI가 추가 힌트를 작성 중..."):
                 advice = ask_gemini_step_help(
                     st.session_state.get("latest_symptom", ""),
@@ -837,7 +870,7 @@ def _ai_chance_dialog(step_idx: int, selected_unit: str, step_title: str, step_b
             st.session_state[f"ai_chance_text_{step_idx}"] = advice
             st.rerun()
     with c2:
-        if st.button("❌ 아니요, 취소", use_container_width=True, key=f"chance_no_{step_idx}"):
+        if st.button("❌ 취소", use_container_width=True, key=f"chance_no_{step_idx}"):
             st.rerun()
 
 def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
