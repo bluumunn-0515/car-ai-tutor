@@ -602,14 +602,14 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
                 help="오늘 실습할 부품 또는 장치의 이름을 정확히 적어주세요.",
             )
             s = st.text_area(
-                "⚡ 현재 상태  —  오늘 실습하고자 하는 부품이나 장치의 상태를 작성하세요",
+                "⚡ 현재 상태",
                 key="diag_current_state",
                 placeholder=hints.get("state", "예: 멀티미터 전압 0V, 점등되지 않음"),
                 help="오늘 실습하고자 하는 부품이나 장치의 상태를 작성하세요.",
                 height=110,
             )
             q = st.text_area(
-                "❓ 학습 질문  —  오늘 실습하는 부품이나 장치의 고장 및 진단, 정비 방법에 대해 자유롭게 질문하세요",
+                "❓ 학습 질문",
                 key="diag_learning_question",
                 placeholder=hints.get("question", "예: 단선 위치는 어떻게 점검하면 되나요?"),
                 help="오늘 실습하는 부품이나 장치의 고장 및 진단, 정비 방법에 대해 자유롭게 질문하세요.",
