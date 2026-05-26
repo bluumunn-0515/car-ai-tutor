@@ -159,6 +159,10 @@ def reset_diagnosis_flow() -> None:
     st.session_state.latest_symptom = ""
     st.session_state.latest_reflection = ""
     st.session_state.latest_image_b64 = ""
+    # 4단계 미션 카드 상태 초기화
+    for i in range(1, 5):
+        for k in (f"step_note_{i}", f"step_photo_{i}", f"step_done_{i}", f"step_photo_b64_{i}"):
+            st.session_state.pop(k, None)
 
 def compose_structured_symptom(target_part: str, current_state: str, learning_question: str) -> str:
     target = (target_part or "").strip()
@@ -196,62 +200,55 @@ STANDARD_PROCEDURE_BLOCK = """
 """.strip()
 
 def build_learning_prompt(user_symptom: str, selected_unit: str) -> str:
-    """NCS 능력단위 하위요소를 반영한 스캐폴딩(scaffolding) 가이드 프롬프트."""
+    """NCS 능력단위 기반 4단계 스캐폴딩 미션 카드(간결형) 프롬프트."""
     sub_elements = NCS_RUBRIC.get(selected_unit, [])
     sub_text_lines = []
     for i, (name, keywords) in enumerate(sub_elements, 1):
-        kw = ", ".join(keywords[:8])
-        sub_text_lines.append(f"  {i}. {name}  —  핵심 키워드: {kw}")
-    sub_text = "\n".join(sub_text_lines) if sub_text_lines else "  (해당 단원의 세부 수행준거 없음)"
+        kw = ", ".join(keywords[:6])
+        sub_text_lines.append(f"  {i}. {name} — {kw}")
+    sub_text = "\n".join(sub_text_lines) or "  (세부 수행준거 없음)"
 
     return f"""
-너는 '자동차 전기전자제어' NCS 기반 AI 튜터다.
-역할: 학생이 스스로 답을 찾도록 돕는 **스캐폴딩(scaffolding)** 학습 가이드를 제공한다.
+너는 '자동차 전기전자제어' NCS 기반 AI 코치다.
+임무: 학생이 **스스로 답을 찾도록** 4단계 미션 카드를 짧고 직관적으로 만든다.
 
-[핵심 원칙]
-- 정답이나 최종 결론을 바로 말하지 말고, "무엇을 어떻게 점검/측정해야 하는가"의 절차·판정 기준만 제시한다.
-- 학생이 입력한 [대상 부품], [현재 상태], [학습 질문]을 반드시 인용·반영하여 맞춤형으로 작성한다.
-- NCS 순서(안전 → 회로 이해 → 측정 → 판정/조치)를 반드시 지킨다.
-- 각 단계마다 (1) 무엇을 할지, (2) 어떤 도구·계측기를 어떻게 쓸지, (3) 통과/불통과 판정 기준 수치를 함께 제시한다.
-- 학생이 사진을 첨부했다면, 사진에서 관찰 가능한 단서(커넥터·단자·계기 눈금 등) 1~2가지를 짚어준다.
-- 학습 질문에 대해서는 직접 답하지 말고, 학생이 스스로 결론에 도달하도록 **소크라테스식 안내 질문**으로 마무리한다.
+[필수 규칙]
+1. 정답·결론·고장 원인을 절대 단정하지 말 것. 측정·관찰·비교 절차만 제시.
+2. 표현은 짧은 동사구 위주, 한 줄당 30자 이내. 설명문/장황한 줄글 금지.
+3. 각 단계는 **불릿 2개**만. 마지막에 학생이 직접 답해야 할 ✋ 질문 1줄.
+4. ⚡ 3단계(측정)만 예외적으로 **정상 기준값**을 괄호로 함께 적는다. (예: 12.6V 이상 정상)
+5. 사진이 있으면 1단계 첫 불릿에 "📷 사진의 ○○ 부위를 확인" 형태로 한 번만 짚는다.
+6. 학생 입력에서 받은 [대상 부품]을 1단계 첫 불릿에 반드시 반영.
 
 [단원] {selected_unit}
 
 [학생 입력]
 {user_symptom or '(미입력)'}
 
-{STANDARD_PROCEDURE_BLOCK}
-
-[이 단원의 NCS 수행준거 하위 요소]
+[NCS 수행준거 하위 요소]
 {sub_text}
 
-다음 형식으로만 출력한다. 각 항목은 학생 입력을 반영해 구체적이고 풍부하게(3~5줄) 작성한다.
+아래 형식만 그대로 따라 출력. 추가 머리말·맺음말 금지.
 
-## 🎯 오늘의 미션 요약
-- 학생이 입력한 대상 부품과 현재 상태를 토대로, 이번 시간에 해결해야 할 미션을 한두 문장으로 정리.
+### 1️⃣ 준비 / 안전
+• (점검 대상 + 안전 확인 1줄)
+• (준비할 계측기/도구 1줄)
+✋ 생각해볼 점: (스스로 확인해야 할 1줄 질문)
 
-## 🧭 진단 흐름 한눈에 보기
-- 안전 → 회로 → 측정 → 판정 4단계 핵심을 한 줄씩 요약.
+### 2️⃣ 점검 / 회로도
+• (회로도에서 추적할 흐름 1줄)
+• (커넥터·퓨즈·접지 등에서 살펴볼 핵심 1줄)
+✋ 생각해볼 점: (스스로 확인해야 할 1줄 질문)
 
-## 🛡️ 1단계 · 준비 / 안전
-- 사전 안전 점검 사항 2~3개 (전원 차단, 보호구, 정비지침서 확인 등).
-- 준비할 도구·계측기 목록.
+### 3️⃣ 측정 / 전압
+• (측정 위치 + 멀티미터 모드/레인지 1줄)
+• (또 다른 측정 포인트 + 정상 기준값 1줄)
+✋ 생각해볼 점: (측정값과 기준을 비교해 스스로 판단할 1줄 질문)
 
-## 🔍 2단계 · 점검 / 회로도
-- 회로도/배선/커넥터에서 추적해야 할 흐름 (전원 → 퓨즈 → 스위치 → 부하 → 접지) 안내.
-- 학생이 회로도에서 찾아야 할 핵심 포인트 1~2개를 질문 형태로 제시.
-
-## ⚡ 3단계 · 측정 / 전압
-- 멀티미터·오실로스코프·스캐너 활용법 (모드·레인지·접점 위치).
-- 측정 포인트 **2개 이상**과 각각의 **정상 기준값**(예: OCV 12.3V±0.2, 전압강하 0.2V 이하 등)을 명시.
-
-## 🛠️ 4단계 · 판정 / 조치
-- 측정 결과에 따라 갈리는 두 갈래 시나리오(이러면 정상 / 이러면 이상).
-- 이상일 때 추가 점검·조치 방향. (정답·고장 원인을 단정하지 말 것)
-
-## 💡 학생 질문에 대한 안내
-- [학습 질문]에 직접 답하지 말고, 학생이 스스로 답을 찾도록 **2~3개의 소크라테스식 안내 질문**으로 마무리.
+### 4️⃣ 판정 / 조치
+• (결과 해석 갈림길: 정상이면 / 이상이면 1줄)
+• (추가 점검 또는 다음 단계 힌트 1줄, 정답 단정 X)
+✋ 생각해볼 점: (다음 행동을 학생이 직접 결정하도록 유도하는 1줄 질문)
 """.strip()
 
 def build_evaluation_prompt(user_symptom: str, student_reasoning: str, selected_unit: str, guidance_text: str) -> str:
@@ -267,6 +264,34 @@ def build_evaluation_prompt(user_symptom: str, student_reasoning: str, selected_
 • ⚡ 측정 / 전압 — [✅ 통과/⚠ 보완] | ...
 • 🛠️ 판정 / 조치 — [✅ 통과/⚠ 보완] | ...
 """
+
+_MISSION_STEP_META = [
+    {"emoji": "🛡️", "title": "준비 / 안전",  "color": "#10B981"},
+    {"emoji": "🔍", "title": "점검 / 회로도", "color": "#3B82F6"},
+    {"emoji": "⚡", "title": "측정 / 전압",   "color": "#F59E0B"},
+    {"emoji": "🛠️", "title": "판정 / 조치",  "color": "#EF4444"},
+]
+
+def _parse_mission_steps(guidance_text: str) -> list[dict]:
+    """AI 가이드에서 ###으로 구분된 4단계를 추출. 형식이 어긋나도 가능한 만큼 파싱."""
+    if not guidance_text:
+        return []
+    lines = guidance_text.splitlines()
+    sections: list[dict] = []
+    current: Optional[dict] = None
+    for raw in lines:
+        line = raw.rstrip()
+        if line.lstrip().startswith("###"):
+            if current is not None:
+                sections.append(current)
+            heading = line.lstrip("# ").strip()
+            current = {"heading": heading, "body_lines": []}
+        elif current is not None:
+            current["body_lines"].append(line)
+    if current is not None:
+        sections.append(current)
+    # 최대 4개만 사용
+    return sections[:4]
 
 def _compose_combined_result(guidance_text: str, evaluation_text: str) -> str:
     """가이드 텍스트와 평가 텍스트를 학생 포트폴리오·교사 대시보드에서 사용하기 좋은 형태로 합친다."""
@@ -678,6 +703,193 @@ def render_ncs_achievement(result_text: str, unit_name: str):
     score = 85 # 예시 점수
     st.progress(score / 100, text=f"오늘의 성취도: {score}점")
 
+_MISSION_STEPS_CSS = """
+<style>
+.mission-card {
+    border-radius: 14px; padding: 14px 18px; margin-bottom: 10px;
+    border-left: 8px solid var(--step-color, #3B82F6);
+    background: #FFFFFF; box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.mission-card h4 { margin: 0 0 6px 0; font-size: 1.4rem; }
+.mission-card .body { line-height: 1.7; font-size: 1.1rem; color: #1F2937; }
+.mission-card .reflect {
+    margin-top: 8px; padding: 8px 12px; border-radius: 8px;
+    background: #FEF3C7; color: #92400E; font-weight: 600;
+}
+.mission-progress {
+    background: #F3F4F6; border-radius: 10px; padding: 10px 14px;
+    margin: 6px 0 14px 0;
+}
+</style>
+"""
+
+def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
+    st.markdown(_MISSION_STEPS_CSS, unsafe_allow_html=True)
+    st.markdown("## 🧭 AI 진단 가이드 — 단계별 미션")
+    st.caption("각 단계의 미션을 보고 직접 실습한 뒤, 진행 상황과 사진을 남겨주세요. AI는 정답을 알려주지 않고 힌트만 줘요.")
+
+    parsed_steps = _parse_mission_steps(st.session_state.get("latest_guidance", ""))
+    # 4개를 채우지 못하면 기본 메타로 패딩
+    steps: list[dict] = []
+    for i in range(4):
+        meta = _MISSION_STEP_META[i]
+        if i < len(parsed_steps):
+            heading = parsed_steps[i]["heading"]
+            body = "\n".join(parsed_steps[i]["body_lines"]).strip()
+        else:
+            heading = f"{i+1}️⃣ {meta['title']}"
+            body = "(AI 가이드 파싱 실패 — 아래 원문을 참고하세요)"
+        steps.append({"meta": meta, "heading": heading, "body": body})
+
+    # 만약 파싱 자체가 완전 실패면 원본 텍스트라도 한 번 보여줌
+    if not parsed_steps:
+        with st.expander("🔎 AI 가이드 원문 보기", expanded=True):
+            st.markdown(st.session_state.get("latest_guidance", ""))
+
+    done_count = 0
+    for i, step in enumerate(steps, 1):
+        meta = step["meta"]
+        is_done = bool(st.session_state.get(f"step_done_{i}", False))
+        if is_done:
+            done_count += 1
+        status = "✅" if is_done else "⏳"
+
+        # 미션 카드 (AI 안내)
+        body_html = step["body"]
+        # ✋ 줄을 따로 강조 처리
+        body_lines, reflect_line = [], ""
+        for ln in body_html.splitlines():
+            if ln.strip().startswith("✋"):
+                reflect_line = ln.strip()
+            else:
+                body_lines.append(ln)
+        body_block = "<br>".join(l for l in body_lines if l.strip())
+        reflect_block = (
+            f'<div class="reflect">{reflect_line}</div>' if reflect_line else ""
+        )
+
+        st.markdown(
+            f"""
+<div class="mission-card" style="--step-color:{meta['color']};">
+  <h4>{status} {meta['emoji']} {i}단계 · {meta['title']}</h4>
+  <div class="body">{body_block}</div>
+  {reflect_block}
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+        # 학생 입력
+        with st.container(border=True):
+            st.text_area(
+                f"📝 {i}단계 진행 상황",
+                key=f"step_note_{i}",
+                placeholder="이 단계에서 무엇을 확인했고, 어떤 값을 측정/관찰했는지 간단히 적어주세요.",
+                height=90,
+            )
+            photo = st.file_uploader(
+                f"📸 {i}단계 진행 사진 (선택)",
+                type=["jpg", "jpeg", "png"],
+                key=f"step_photo_{i}",
+            )
+            if photo is not None:
+                try:
+                    st.image(photo, width=260, caption=f"{i}단계 사진 미리보기")
+                    # 썸네일 base64를 세션에 캐싱(저장 시 사용)
+                    st.session_state[f"step_photo_b64_{i}"] = make_thumbnail_b64(photo)
+                except Exception as _e:
+                    logger.warning("단계 사진 미리보기 실패: %s", _e)
+            st.checkbox(
+                "이 단계를 완료했어요",
+                key=f"step_done_{i}",
+                help="모든 단계를 체크해야 평가받기 버튼이 활성화됩니다.",
+            )
+
+    # 진행률
+    progress = done_count / 4
+    st.markdown(
+        f'<div class="mission-progress"><b>📊 단계 진행률</b> &nbsp; {done_count} / 4 단계 완료</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress(progress)
+
+    st.markdown("---")
+    refl = st.text_area(
+        "📝 오늘의 실습 소감",
+        key="diag_reflection",
+        placeholder="이번 실습에서 새로 알게 된 점, 어려웠던 점 등을 적어주세요.",
+        height=110,
+    )
+
+    all_done = done_count == 4
+    if not all_done:
+        st.info("🔒 4단계를 모두 완료해야 결과 평가를 받을 수 있어요.")
+
+    if st.button(
+        "✅ 모든 단계 완료, 결과 평가 받기",
+        type="primary",
+        use_container_width=True,
+        disabled=not all_done,
+    ):
+        # 단계별 메모를 학생 결과(reasoning) 텍스트로 합치기
+        reasoning_blocks = []
+        photos_b64: dict[str, str] = {}
+        for i in range(1, 5):
+            note = (st.session_state.get(f"step_note_{i}") or "").strip()
+            photo_b64 = st.session_state.get(f"step_photo_b64_{i}") or ""
+            meta = _MISSION_STEP_META[i - 1]
+            reasoning_blocks.append(
+                f"[{i}단계 · {meta['emoji']} {meta['title']}]\n{note or '(메모 없음)'}"
+            )
+            if photo_b64:
+                photos_b64[str(i)] = photo_b64
+        student_reasoning = "\n\n".join(reasoning_blocks)
+
+        if not api_key:
+            st.error("❌ Gemini API 키가 설정되어 있지 않습니다. 선생님께 문의해 주세요.")
+            return
+
+        with st.spinner("🤖 AI가 4단계 실습 결과를 평가 중이에요..."):
+            eval_res = ask_gemini(
+                st.session_state.latest_symptom, student_reasoning, None,
+                api_key, selected_unit, "evaluation",
+                st.session_state.latest_guidance,
+            )
+        if (not eval_res) or eval_res.lstrip().startswith("❌"):
+            st.error(eval_res or "AI 평가 응답을 받지 못했습니다.")
+            return
+
+        import json as _json
+        record = {
+            "record_id": str(uuid.uuid4()),
+            "submitted_at": now_kst_display(),
+            "student_id": st.session_state.student_id,
+            "student_display_name": st.session_state.student_display_name,
+            "subject": "자동차 전기전자제어",
+            "unit": selected_unit,
+            "mode": "학습 모드",
+            "symptom": st.session_state.latest_symptom,
+            "reasoning": student_reasoning,
+            "result": _compose_combined_result(st.session_state.latest_guidance, eval_res),
+            "reflection": refl,
+            "image_b64": st.session_state.latest_image_b64,
+            "mission_step_photos_json": _json.dumps(photos_b64, ensure_ascii=False) if photos_b64 else "",
+            "teacher_feedback": "",
+            "teacher_feedback_updated_at": "",
+        }
+        try:
+            shb.append_history_from_record(record, 80.0)
+            shb.invalidate_all_sheet_caches()
+            st.session_state["my_history_records"] = shb.filter_history_records_by_student(
+                st.session_state.student_id
+            )
+        except Exception as _save_e:
+            logger.exception("history 저장 실패: %s", _save_e)
+            st.warning(f"기록 저장에 실패했어요(평가는 정상): {_save_e}")
+        st.session_state.latest_evaluation = eval_res
+        st.session_state.diag_step = "result"
+        st.rerun()
+
 def _render_diagnosis_input_tab(selected_unit: str, api_key: str):
     diag_step = st.session_state.get("diag_step", "input")
     
@@ -766,52 +978,7 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
                         st.rerun()
 
     elif diag_step == "guidance":
-        render_mission_card(st.session_state.latest_guidance)
-        st.markdown("---")
-        res = st.text_area("🧪 실습 수행 결과 입력", height=200)
-        refl = st.text_area("📝 오늘의 실습 소감", placeholder="실습을 통해 느낀 점을 적어주세요.")
-        
-        if st.button("✅ 결과 제출 및 평가받기", type="primary", use_container_width=True):
-            if not (res or "").strip():
-                st.warning("⚠ 실습 수행 결과를 한 줄이라도 입력해 주세요.")
-            elif not api_key:
-                st.error("❌ Gemini API 키가 설정되어 있지 않습니다. 선생님께 문의해 주세요.")
-            else:
-                with st.spinner("🤖 AI가 실습 결과를 평가 중이에요..."):
-                    eval_res = ask_gemini(
-                        st.session_state.latest_symptom, res, None,
-                        api_key, selected_unit, "evaluation",
-                        st.session_state.latest_guidance,
-                    )
-                if (not eval_res) or eval_res.lstrip().startswith("❌"):
-                    st.error(eval_res or "AI 평가 응답을 받지 못했습니다.")
-                else:
-                    record = {
-                        "record_id": str(uuid.uuid4()),
-                        "submitted_at": now_kst_display(),
-                        "student_id": st.session_state.student_id,
-                        "student_display_name": st.session_state.student_display_name,
-                        "subject": "자동차 전기전자제어",
-                        "unit": selected_unit,
-                        "mode": "학습 모드",
-                        "symptom": st.session_state.latest_symptom,
-                        "reasoning": res,
-                        "result": _compose_combined_result(st.session_state.latest_guidance, eval_res),
-                        "reflection": refl,
-                        "image_b64": st.session_state.latest_image_b64,
-                        "teacher_feedback": "",
-                        "teacher_feedback_updated_at": "",
-                    }
-                    try:
-                        shb.append_history_from_record(record, 80.0)
-                        shb.invalidate_all_sheet_caches()
-                        st.session_state["my_history_records"] = shb.filter_history_records_by_student(st.session_state.student_id)
-                    except Exception as _save_e:
-                        logger.exception("history 저장 실패: %s", _save_e)
-                        st.warning(f"기록 저장에 실패했어요(평가는 정상): {_save_e}")
-                    st.session_state.latest_evaluation = eval_res
-                    st.session_state.diag_step = "result"
-                    st.rerun()
+        _render_mission_steps_ui(selected_unit, api_key)
 
     elif diag_step == "result":
         st.success("🎉 실습이 완료되었습니다!")
