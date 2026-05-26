@@ -968,10 +968,9 @@ def _render_portfolio_view():
 def render_student_mode():
     st.sidebar.title("메뉴")
     view = st.sidebar.radio("이동", ["🧑‍🏫 학습 모드", "📓 나의 포트폴리오"])
-    
-    # API KEY 로드
+
     api_key = st.secrets.get("GEMINI_API_KEY", "")
-    
+
     if view == "🧑‍🏫 학습 모드":
         unit = st.selectbox("단원 선택", NCS_UNITS)
         _render_diagnosis_input_tab(unit, api_key)
@@ -979,27 +978,261 @@ def render_student_mode():
         _render_portfolio_view()
 
 # ───────────────────────────────────────────────────────────────────────────
+# 교사 모드 (학생별 기록 보기 + 피드백 작성)
+# ───────────────────────────────────────────────────────────────────────────
+def _get_teacher_password() -> str:
+    try:
+        return str(st.secrets.get("TEACHER_PASSWORD") or TEACHER_PASSWORD_DEFAULT)
+    except Exception:
+        return TEACHER_PASSWORD_DEFAULT
+
+def render_teacher_login() -> None:
+    st.markdown("### 🧑‍🏫 교사 로그인")
+    with st.form("teacher_login_form"):
+        pw = st.text_input("교사 비밀번호", type="password",
+                           help="기본값은 0000이며, secrets의 TEACHER_PASSWORD로 변경 가능합니다.")
+        ok = st.form_submit_button("로그인", type="primary")
+    if ok:
+        if pw == _get_teacher_password():
+            st.session_state["teacher_logged_in"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+
+def render_teacher_mode() -> None:
+    st.header("🧑‍🏫 교사 대시보드")
+    st.caption("학생들의 실습 기록을 확인하고 피드백을 남길 수 있습니다.")
+
+    try:
+        df = shb.force_refresh_history()
+    except Exception as e:
+        logger.exception("history 시트 로드 실패: %s", e)
+        st.error("학습 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        return
+
+    if df is None or df.empty:
+        st.info("아직 누적된 학생 실습 기록이 없습니다.")
+        return
+
+    records = shb.history_df_to_records(df)
+
+    # 학생 목록 구성
+    students: dict[str, str] = {}
+    for r in records:
+        sid = (r.get("student_id") or "").strip()
+        if not sid:
+            continue
+        name = (r.get("student_display_name") or "").strip()
+        students[sid] = name or students.get(sid, "")
+
+    if not students:
+        st.info("학생 정보가 포함된 기록을 찾지 못했습니다.")
+        return
+
+    # 통계 요약
+    col1, col2, col3 = st.columns(3)
+    col1.metric("등록된 학생 수", f"{len(students)} 명")
+    col2.metric("총 실습 기록", f"{len(records)} 건")
+    fb_done = sum(1 for r in records if (r.get("teacher_feedback") or "").strip())
+    col3.metric("피드백 완료", f"{fb_done} / {len(records)} 건")
+
+    st.markdown("---")
+
+    options = sorted(students.keys())
+    labels = {sid: f"{students[sid] or '(이름 미상)'}  ·  {sid}" for sid in options}
+    sel_sid = st.selectbox(
+        "학생 선택", options=options,
+        format_func=lambda s: labels.get(s, s),
+    )
+    if not sel_sid:
+        return
+
+    student_records = [r for r in records if (r.get("student_id") or "").strip() == sel_sid]
+    student_records.sort(key=lambda r: r.get("submitted_at", ""), reverse=True)
+    st.markdown(f"#### 📒 {students[sel_sid] or '(이름 미상)'} 학생의 실습 기록 ({len(student_records)}건)")
+
+    for rec in student_records:
+        rid = (rec.get("record_id") or "").strip()
+        unit = rec.get("unit", "")
+        icon = UNIT_ICONS.get(unit, "📘")
+        when = (rec.get("submitted_at") or "")[:16]
+        score = _safe_float(rec.get("ncs_score"))
+        has_fb = bool((rec.get("teacher_feedback") or "").strip())
+        title = f"{icon} {unit} · {when} · {score:.0f}점 {'✅ 피드백 완료' if has_fb else '⏳ 피드백 필요'}"
+        with st.expander(title, expanded=False):
+            st.markdown(f"**🔍 수행 내용**")
+            st.code(rec.get("symptom") or "(없음)")
+            if rec.get("reasoning"):
+                st.markdown("**🧪 학생이 작성한 진단**")
+                st.write(rec.get("reasoning"))
+            if rec.get("reflection"):
+                st.markdown("**📝 학생 소감**")
+                st.info(rec.get("reflection"))
+            img_bytes = thumbnail_b64_to_bytes(rec.get("image_b64"))
+            if img_bytes:
+                st.image(img_bytes, width=280)
+            with st.expander("🤖 AI 평가 보기", expanded=False):
+                st.markdown(rec.get("result") or "(AI 평가 없음)")
+
+            st.markdown("---")
+            st.markdown("**💬 교사 피드백 작성**")
+            if not rid:
+                st.warning("이 기록은 record_id가 없어 피드백 저장이 불가합니다.")
+                continue
+            current_fb = rec.get("teacher_feedback") or ""
+            new_fb = st.text_area(
+                "피드백 내용", value=current_fb, key=f"fb_{rid}", height=120,
+                placeholder="예: 멀티미터 측정 절차를 정확히 따랐어요. 다음에는 접지 측정도 추가해 보세요.",
+            )
+            save_col, info_col = st.columns([1, 3])
+            with save_col:
+                if st.button("💾 피드백 저장", key=f"save_{rid}", type="primary"):
+                    try:
+                        shb.update_teacher_feedback_in_sheet(
+                            rid, new_fb.strip(), now_kst_display()
+                        )
+                        shb.invalidate_all_sheet_caches()
+                        st.success("피드백이 저장되었습니다.")
+                        st.rerun()
+                    except Exception as e:
+                        logger.exception("피드백 저장 실패: %s", e)
+                        st.error(f"저장 실패: {e}")
+            with info_col:
+                updated = rec.get("teacher_feedback_updated_at") or ""
+                if updated:
+                    st.caption(f"최근 저장: {updated}")
+
+# ───────────────────────────────────────────────────────────────────────────
+# 랜딩(역할 선택) 페이지
+# ───────────────────────────────────────────────────────────────────────────
+def render_landing() -> None:
+    st.markdown(
+        """
+<style>
+.landing-wrap { max-width:760px; margin:1rem auto 0 auto; text-align:center; }
+.landing-hero { padding: 14px 0 6px 0; }
+.landing-title {
+    font-size: 2.2rem; font-weight: 800; color: #1e3a8a; margin: 0;
+    letter-spacing: -0.5px;
+}
+.landing-sub { color:#475569; font-size:1rem; margin:6px 0 0 0; }
+.landing-hint { color:#64748b; font-size:0.95rem; margin: 18px 0 14px 0; line-height:1.55; }
+.mode-cards { display:flex; gap:18px; justify-content:center; margin-top:8px; }
+.mode-card {
+    flex:1; min-width:220px; max-width:320px;
+    padding: 28px 22px; border-radius:18px; text-decoration:none;
+    box-shadow:0 6px 18px rgba(15,23,42,0.10);
+    border:2px solid transparent; display:block; text-align:center;
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+.mode-card:hover { transform: translateY(-3px); box-shadow:0 14px 30px rgba(15,23,42,0.16); }
+.mode-card-teacher {
+    background: linear-gradient(160deg,#fffde7 0%,#fff59d 40%,#fdd835 100%);
+    border-color:#f9a825; color:#3e2723;
+}
+.mode-card-student {
+    background: linear-gradient(160deg,#e3f2fd 0%,#90caf9 45%,#42a5f5 100%);
+    border-color:#1565c0; color:#0d47a1;
+}
+.mode-card-label { font-size:1.25rem; font-weight:800; display:block; margin-bottom:6px; }
+.mode-card-desc { font-size:0.95rem; opacity:0.95; }
+.landing-foot { color:#94a3b8; font-size:0.85rem; margin-top:28px; }
+</style>
+<div class="landing-wrap">
+  <div class="landing-hero">
+    <h1 class="landing-title">🚗 자동차 고장진단 AI tutor</h1>
+    <p class="landing-sub">자동차 전기전자제어 · NCS 수행준거 기반 학습 도우미</p>
+  </div>
+  <p class="landing-hint">아래에서 역할을 선택해 주세요.<br/>선택한 역할은 세션 동안 유지되며, 사이드바에서 언제든 다시 바꿀 수 있어요.</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    _, c1, c2, _ = st.columns([1, 2, 2, 1])
+    with c1:
+        st.markdown(
+            """
+<div class="mode-card mode-card-teacher">
+  <span class="mode-card-label">🧑‍🏫 교사 모드</span>
+  <span class="mode-card-desc">학생 실습 기록 확인 · 피드백 작성</span>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        if st.button("교사 모드로 진입", key="landing_btn_teacher",
+                     use_container_width=True, type="primary"):
+            st.session_state["app_role"] = "teacher"
+            st.rerun()
+    with c2:
+        st.markdown(
+            """
+<div class="mode-card mode-card-student">
+  <span class="mode-card-label">🧑‍🎓 학생 모드</span>
+  <span class="mode-card-desc">고장진단 실습 진행 · 포트폴리오 작성</span>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        if st.button("학생 모드로 진입", key="landing_btn_student",
+                     use_container_width=True, type="primary"):
+            st.session_state["app_role"] = "student"
+            st.rerun()
+
+    st.markdown(
+        '<p class="landing-foot" style="text-align:center;">NCS 수행준거 기반 · 소크라테스식 AI 학습 지원</p>',
+        unsafe_allow_html=True,
+    )
+
+# ───────────────────────────────────────────────────────────────────────────
 # 메인 진입점
 # ───────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="자동차 고장진단 AI tutor", page_icon="🚗", layout="wide")
-shb.gsheets_available() # 연결 확인
+shb.gsheets_available()
 
+# 세션 상태 초기화
+if "app_role" not in st.session_state:
+    st.session_state["app_role"] = None
 if "student_logged_in" not in st.session_state:
-    st.session_state.student_logged_in = False
+    st.session_state["student_logged_in"] = False
+if "teacher_logged_in" not in st.session_state:
+    st.session_state["teacher_logged_in"] = False
 
-if not st.session_state.student_logged_in:
-    # 로그인 UI (기존 로직 유지)
-    with st.form("login"):
-        sid = st.text_input("학번")
-        name = st.text_input("이름")
-        pw = st.text_input("비밀번호", type="password")
-        if st.form_submit_button("로그인"):
-            # shb.get_user_row 등으로 검증 후
-            st.session_state.student_id = sid
-            st.session_state.student_display_name = name
-            st.session_state.student_logged_in = True
-            # 로그인 시 즉시 데이터 동기화
-            st.session_state["my_history_records"] = shb.filter_history_records_by_student(sid)
-            st.rerun()
+# ── 역할 미선택 → 랜딩 페이지 표시 ──────────────────────
+if st.session_state["app_role"] is None:
+    render_landing()
+    st.stop()
+
+# ── 사이드바: 현재 역할 표시 + 역할 재선택 ────────────
+with st.sidebar:
+    role = st.session_state["app_role"]
+    role_label = "🧑‍🏫 교사" if role == "teacher" else "🧑‍🎓 학생"
+    st.markdown(f"### {role_label} 모드")
+    if st.button("🔄 역할 다시 선택", use_container_width=True):
+        st.session_state["app_role"] = None
+        st.session_state["teacher_logged_in"] = False
+        reset_student_session_soft()
+        st.rerun()
+    st.markdown("---")
+
+# ── 역할에 따른 화면 분기 ─────────────────────────────
+if st.session_state["app_role"] == "teacher":
+    if not st.session_state.get("teacher_logged_in"):
+        render_teacher_login()
+    else:
+        render_teacher_mode()
 else:
-    render_student_mode()
+    if not st.session_state.get("student_logged_in"):
+        st.markdown("### 🧑‍🎓 학생 로그인")
+        with st.form("login"):
+            sid = st.text_input("학번")
+            name = st.text_input("이름")
+            pw = st.text_input("비밀번호", type="password")
+            if st.form_submit_button("로그인", type="primary"):
+                st.session_state.student_id = sid
+                st.session_state.student_display_name = name
+                st.session_state.student_logged_in = True
+                st.session_state["my_history_records"] = shb.filter_history_records_by_student(sid)
+                st.rerun()
+    else:
+        render_student_mode()
