@@ -1288,6 +1288,14 @@ html, body, [class*="st-emotion"], .stApp { font-size: 1.5rem !important; line-h
 .stDataFrame, .stTable { font-size: 1.05rem !important; }
 .stCode, pre, code { font-size: 1.05rem !important; }
 
+/* 사이드바 너비 확대 (메뉴 항목이 한 줄에 표시되도록) */
+section[data-testid="stSidebar"] { width: 340px !important; min-width: 340px !important; }
+section[data-testid="stSidebar"] > div:first-child { width: 340px !important; min-width: 340px !important; }
+section[data-testid="stSidebar"] .stButton button,
+section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+    white-space: nowrap !important;
+}
+
 /* 사이드바 전체 1.5배 확대 */
 section[data-testid="stSidebar"] * { font-size: 1.15rem !important; }
 section[data-testid="stSidebar"] h1 { font-size: 1.9rem !important; }
