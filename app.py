@@ -566,14 +566,59 @@ def _render_diagnosis_input_tab(selected_unit: str, api_key: str):
     diag_step = st.session_state.get("diag_step", "input")
     
     if diag_step == "input":
+        # AI 가이드 받기 버튼을 크고 눈에 띄게 만드는 전용 스타일
+        st.markdown(
+            """
+<style>
+div.stButton > button[kind="primary"] {
+    font-size: 1.35rem !important;
+    font-weight: 800 !important;
+    padding: 18px 28px !important;
+    border-radius: 14px !important;
+    background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
+    color: #ffffff !important;
+    border: none !important;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.30) !important;
+    transition: transform .18s ease, box-shadow .18s ease, filter .18s ease !important;
+    letter-spacing: 0.5px;
+}
+div.stButton > button[kind="primary"]:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 16px 32px rgba(37, 99, 235, 0.40) !important;
+    filter: brightness(1.05);
+}
+div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
+</style>
+""",
+            unsafe_allow_html=True,
+        )
         with st.container(border=True):
             st.markdown(f"### 📝 오늘의 과제: {selected_unit}")
-            t = st.text_input("🔍 대상 부품", key="diag_target_part")
-            s = st.text_area("⚡ 현재 상태", key="diag_current_state")
-            q = st.text_area("❓ 학습 질문", key="diag_learning_question")
+            hints = UNIT_INPUT_HINTS.get(selected_unit, {})
+            t = st.text_input(
+                "🔍 대상 부품",
+                key="diag_target_part",
+                placeholder=hints.get("target", "예: 운전석 도어 커넥터 E12"),
+                help="오늘 실습할 부품 또는 장치의 이름을 정확히 적어주세요.",
+            )
+            s = st.text_area(
+                "⚡ 현재 상태  —  오늘 실습하고자 하는 부품이나 장치의 상태를 작성하세요",
+                key="diag_current_state",
+                placeholder=hints.get("state", "예: 멀티미터 전압 0V, 점등되지 않음"),
+                help="오늘 실습하고자 하는 부품이나 장치의 상태를 작성하세요.",
+                height=110,
+            )
+            q = st.text_area(
+                "❓ 학습 질문  —  오늘 실습하는 부품이나 장치의 고장 및 진단, 정비 방법에 대해 자유롭게 질문하세요",
+                key="diag_learning_question",
+                placeholder=hints.get("question", "예: 단선 위치는 어떻게 점검하면 되나요?"),
+                help="오늘 실습하는 부품이나 장치의 고장 및 진단, 정비 방법에 대해 자유롭게 질문하세요.",
+                height=110,
+            )
             img = st.file_uploader("📸 사진 업로드", type=["jpg", "png"])
-            
-            if st.button("🚀 AI 가이드 받기"):
+
+            st.markdown("")
+            if st.button("🚀 AI 가이드 받기", type="primary", use_container_width=True):
                 symptom = compose_structured_symptom(t, s, q)
                 with st.spinner("가이드 생성 중..."):
                     guide = ask_gemini(symptom, "", img, api_key, selected_unit, "guidance")
