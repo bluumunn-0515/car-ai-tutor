@@ -41,6 +41,7 @@ HISTORY_COLS = [
     "reflection",
     "image_b64",
     "mission_step_photos_json",
+    "ai_chance_used_steps",
 ]
 
 _CACHE_TTL_SEC = 60.0
@@ -263,6 +264,7 @@ def append_history_from_record(record: dict[str, Any], ncs_score: float) -> None
         "reflection": record.get("reflection", ""),
         "image_b64": record.get("image_b64", ""),
         "mission_step_photos_json": record.get("mission_step_photos_json", ""),
+        "ai_chance_used_steps": record.get("ai_chance_used_steps", ""),
     }
     _append_rows_via_update(SHEET_HISTORY, HISTORY_COLS, [row])
     st.session_state.pop("_gs_history_df", None)

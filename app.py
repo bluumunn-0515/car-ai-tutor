@@ -161,7 +161,11 @@ def reset_diagnosis_flow() -> None:
     st.session_state.latest_image_b64 = ""
     # 4단계 미션 카드 상태 초기화
     for i in range(1, 5):
-        for k in (f"step_note_{i}", f"step_photo_{i}", f"step_done_{i}", f"step_photo_b64_{i}"):
+        for k in (
+            f"step_note_{i}", f"step_photo_{i}", f"step_done_{i}",
+            f"step_photo_b64_{i}",
+            f"ai_chance_used_{i}", f"ai_chance_text_{i}",
+        ):
             st.session_state.pop(k, None)
 
 def compose_structured_symptom(target_part: str, current_state: str, learning_question: str) -> str:
@@ -300,6 +304,73 @@ def _compose_combined_result(guidance_text: str, evaluation_text: str) -> str:
     if g and e:
         return f"## 🧭 AI 진단 가이드\n\n{g}\n\n---\n\n## 📝 AI 실습 평가\n\n{e}"
     return e or g
+
+def build_step_help_prompt(
+    user_symptom: str, selected_unit: str, step_idx: int,
+    step_title: str, step_body: str,
+) -> str:
+    """AI 찬스: 특정 단계에 대해 더 구체적인 힌트를 주되 정답은 금지."""
+    return f"""
+너는 '자동차 전기전자제어' NCS 기반 AI 코치다.
+지금 학생이 [{step_idx}단계 · {step_title}]에서 막혀 있어 더 자세한 도움을 요청했다.
+
+[규칙]
+- 정답·고장 원인을 절대 단정하지 말 것. (예: "이건 배터리 불량입니다" 금지)
+- 학생이 다음에 무엇을 시도해봐야 하는지, 어떻게 측정·관찰·비교해야 하는지만 안내.
+- 한 줄당 30자 이내, 짧고 직관적인 동사구 위주.
+- 총 5~7줄, 불릿(•)만 사용.
+- 마지막 줄은 "✋ 다음에 직접 답해봐: ..." 형태로 학생 스스로 답해야 할 핵심 질문 1줄.
+- 측정값을 다룬다면 정상 기준값을 괄호로 함께 표기 (예: 12.6V 이상 정상).
+
+[학생이 처음 입력한 내용]
+{user_symptom or '(미입력)'}
+
+[단원] {selected_unit}
+
+[현재 단계 AI 안내 원문]
+{step_body or '(원문 없음)'}
+
+위 정보를 바탕으로 이 단계만을 위한 **추가 힌트**를 다음 형식으로 출력:
+
+🆘 AI 찬스 — {step_idx}단계 추가 힌트
+• ...
+• ...
+• ...
+• ...
+✋ 다음에 직접 답해봐: ...
+""".strip()
+
+def ask_gemini_step_help(
+    user_symptom: str, selected_unit: str, step_idx: int,
+    step_title: str, step_body: str, key: str,
+) -> str:
+    """AI 찬스 호출. 실패 시 ask_gemini와 동일한 에러 메시지 규약을 사용."""
+    if genai is None or types is None:
+        return "❌ google-genai 패키지를 불러오지 못했습니다."
+    if not (key and str(key).strip()):
+        return "❌ Gemini API 키가 설정되어 있지 않습니다."
+    try:
+        client = genai.Client(api_key=str(key).strip())
+    except Exception as e:
+        return f"❌ Gemini 클라이언트 초기화 실패: {type(e).__name__}: {e}"
+    prompt = build_step_help_prompt(user_symptom, selected_unit, step_idx, step_title, step_body)
+    parts = [types.Part.from_text(text=prompt)]
+    last_error = "(원인 미상)"
+    for model_name in GEMINI_MODEL_CANDIDATES:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[types.Content(role="user", parts=parts)],
+            )
+            text = (getattr(response, "text", None) or "").strip()
+            if text:
+                return text
+            last_error = "응답이 비어있음"
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+            logger.error("AI 찬스 호출 에러 (%s): %s", model_name, e)
+            continue
+    return f"❌ AI 찬스 응답 실패: {last_error}"
 
 def _detect_image_mime(image_file: Any) -> str:
     """Streamlit file_uploader의 UploadedFile에서 mime 타입을 안전하게 추출."""
@@ -723,11 +794,51 @@ _MISSION_STEPS_CSS = """
     background: #FEF3C7; color: #92400E; font-weight: 600;
 }
 .mission-progress {
-    background: #F3F4F6; border-radius: 10px; padding: 10px 14px;
+    background: #EFF6FF; border-radius: 10px; padding: 12px 16px;
     margin: 6px 0 14px 0;
+    color: #1D4ED8 !important;
+    font-weight: 700; font-size: 1.15rem;
+}
+.mission-progress * { color: #1D4ED8 !important; }
+.ai-chance-result {
+    margin-top: 6px; padding: 14px 16px; border-radius: 12px;
+    background: linear-gradient(135deg,#FEF3C7 0%,#FDE68A 100%);
+    border-left: 6px solid #D97706; color: #78350F; font-size: 1.05rem;
+    line-height: 1.7;
+}
+.ai-chance-result h5 { margin: 0 0 6px 0; color:#92400E; font-size:1.15rem; }
+.ai-chance-badge {
+    display:inline-block; padding:4px 10px; border-radius:999px;
+    background:#FEF3C7; color:#92400E; font-weight:700; font-size:12px;
+    margin-left:6px;
 }
 </style>
 """
+
+@st.dialog("⚠ AI 찬스 사용 확인")
+def _ai_chance_dialog(step_idx: int, selected_unit: str, step_title: str, step_body: str, api_key: str) -> None:
+    st.warning(
+        "더 많은 도움을 받을 순 있지만 수행평가 평가에서 **감점요소**로 작용합니다.\n\n"
+        "그래도 진행하시겠습니까?"
+    )
+    st.caption(f"대상 단계: **{step_idx}단계 · {step_title}**")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("✅ 예, AI 찬스 사용하기", type="primary", use_container_width=True, key=f"chance_yes_{step_idx}"):
+            with st.spinner("AI가 추가 힌트를 작성 중..."):
+                advice = ask_gemini_step_help(
+                    st.session_state.get("latest_symptom", ""),
+                    selected_unit, step_idx, step_title, step_body, api_key,
+                )
+            if (not advice) or advice.lstrip().startswith("❌"):
+                st.error(advice or "AI 찬스 응답을 받지 못했습니다.")
+                return
+            st.session_state[f"ai_chance_used_{step_idx}"] = True
+            st.session_state[f"ai_chance_text_{step_idx}"] = advice
+            st.rerun()
+    with c2:
+        if st.button("❌ 아니요, 취소", use_container_width=True, key=f"chance_no_{step_idx}"):
+            st.rerun()
 
 def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
     st.markdown(_MISSION_STEPS_CSS, unsafe_allow_html=True)
@@ -785,6 +896,35 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
             unsafe_allow_html=True,
         )
 
+        # AI 찬스 — 더 자세한 힌트 요청 (감점 경고)
+        chance_used = bool(st.session_state.get(f"ai_chance_used_{i}", False))
+        chance_text = st.session_state.get(f"ai_chance_text_{i}", "")
+        bcol1, bcol2 = st.columns([1, 3])
+        with bcol1:
+            if chance_used:
+                st.markdown(
+                    '<span class="ai-chance-badge">🆘 AI 찬스 사용함 (감점 적용)</span>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                if st.button(
+                    "🆘 AI 찬스 사용하기",
+                    key=f"open_chance_{i}",
+                    help="이 단계에서 더 자세한 힌트를 받아요. 단, 평가에서 감점됩니다.",
+                ):
+                    _ai_chance_dialog(i, selected_unit, meta["title"], step["body"], api_key)
+        if chance_used and chance_text:
+            safe_text = chance_text.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+            st.markdown(
+                f"""
+<div class="ai-chance-result">
+  <h5>🆘 AI 찬스 — {i}단계 추가 힌트</h5>
+  {safe_text}
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
         # 학생 입력
         with st.container(border=True):
             st.text_area(
@@ -813,8 +953,12 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
 
     # 진행률
     progress = done_count / 4
+    used_chances = sum(1 for i in range(1, 5) if st.session_state.get(f"ai_chance_used_{i}"))
+    chance_html = (
+        f' · AI 찬스 사용 {used_chances}회' if used_chances else ""
+    )
     st.markdown(
-        f'<div class="mission-progress"><b>📊 단계 진행률</b> &nbsp; {done_count} / 4 단계 완료</div>',
+        f'<div class="mission-progress">📊 단계 진행률 &nbsp; <b>{done_count} / 4 단계 완료</b>{chance_html}</div>',
         unsafe_allow_html=True,
     )
     st.progress(progress)
@@ -837,19 +981,28 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
         use_container_width=True,
         disabled=not all_done,
     ):
-        # 단계별 메모를 학생 결과(reasoning) 텍스트로 합치기
+        # 단계별 메모 + AI 찬스 정보 통합
         reasoning_blocks = []
         photos_b64: dict[str, str] = {}
+        ai_chance_steps: list[int] = []
         for i in range(1, 5):
             note = (st.session_state.get(f"step_note_{i}") or "").strip()
             photo_b64 = st.session_state.get(f"step_photo_b64_{i}") or ""
             meta = _MISSION_STEP_META[i - 1]
+            chance_used = bool(st.session_state.get(f"ai_chance_used_{i}", False))
+            chance_marker = "  ⚠ AI 찬스 사용" if chance_used else ""
             reasoning_blocks.append(
-                f"[{i}단계 · {meta['emoji']} {meta['title']}]\n{note or '(메모 없음)'}"
+                f"[{i}단계 · {meta['emoji']} {meta['title']}]{chance_marker}\n"
+                f"{note or '(메모 없음)'}"
             )
             if photo_b64:
                 photos_b64[str(i)] = photo_b64
+            if chance_used:
+                ai_chance_steps.append(i)
         student_reasoning = "\n\n".join(reasoning_blocks)
+
+        # AI 찬스 사용 단계당 -7점, 기본 80점, 최저 45점
+        ncs_score = max(45.0, 80.0 - 7.0 * len(ai_chance_steps))
 
         if not api_key:
             st.error("❌ Gemini API 키가 설정되어 있지 않습니다. 선생님께 문의해 주세요.")
@@ -880,11 +1033,12 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
             "reflection": refl,
             "image_b64": st.session_state.latest_image_b64,
             "mission_step_photos_json": _json.dumps(photos_b64, ensure_ascii=False) if photos_b64 else "",
+            "ai_chance_used_steps": ",".join(str(s) for s in ai_chance_steps),
             "teacher_feedback": "",
             "teacher_feedback_updated_at": "",
         }
         try:
-            shb.append_history_from_record(record, 80.0)
+            shb.append_history_from_record(record, ncs_score)
             shb.invalidate_all_sheet_caches()
             st.session_state["my_history_records"] = shb.filter_history_records_by_student(
                 st.session_state.student_id
@@ -1035,6 +1189,7 @@ _PORTFOLIO_CSS = """
     font-size:12px; font-weight:600; margin-left:4px; }
 .pf-chip-fb { background:#DBEAFE; color:#1D4ED8; }
 .pf-chip-wait { background:#F3F4F6; color:#6B7280; }
+.pf-chip-chance { background:#FEF3C7; color:#92400E; }
 .pf-score {
     display:inline-block; padding:4px 12px; border-radius:8px;
     font-weight:700; font-size:13px; color:#fff;
@@ -1131,6 +1286,21 @@ def _render_achievement_charts(records: list[dict]) -> None:
         else:
             st.info("AI 평가 결과에 카테고리 정보가 누적되면 레이더 차트가 표시돼요.")
 
+def _parse_ai_chance_steps(rec: dict) -> list[int]:
+    """기록에서 AI 찬스 사용 단계 번호 목록을 안전하게 파싱."""
+    raw = (rec.get("ai_chance_used_steps") or "").strip()
+    if not raw:
+        return []
+    out: list[int] = []
+    for tok in re.split(r"[,\s]+", raw):
+        try:
+            n = int(tok)
+            if 1 <= n <= 4:
+                out.append(n)
+        except ValueError:
+            continue
+    return sorted(set(out))
+
 def _render_record_card(rec: dict) -> None:
     unit = rec.get("unit", "")
     icon = UNIT_ICONS.get(unit, "📘")
@@ -1142,6 +1312,11 @@ def _render_record_card(rec: dict) -> None:
     fb_chip = ('<span class="pf-chip pf-chip-fb">📬 피드백 도착</span>'
                if has_fb else
                '<span class="pf-chip pf-chip-wait">⏳ 피드백 대기</span>')
+    chance_steps = _parse_ai_chance_steps(rec)
+    chance_chip = (
+        f'<span class="pf-chip pf-chip-chance">🆘 AI 찬스 {len(chance_steps)}회 사용 (감점)</span>'
+        if chance_steps else ""
+    )
 
     with st.container():
         st.markdown(
@@ -1154,7 +1329,7 @@ def _render_record_card(rec: dict) -> None:
     </div>
     <div style="text-align:right;">
       <div class="pf-score" style="background:{color};">{score:.0f}점 · {band}</div>
-      <div style="margin-top:6px;">{fb_chip}</div>
+      <div style="margin-top:6px;">{fb_chip} {chance_chip}</div>
     </div>
   </div>
 </div>""",
@@ -1167,6 +1342,17 @@ def _render_record_card(rec: dict) -> None:
 <div class="pf-fb-card">
   <div class="pf-fb-head"><span>🎯 선생님 피드백</span></div>
   <div class="pf-fb-body">{(rec.get('teacher_feedback') or '').strip()}</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+
+            if chance_steps:
+                steps_str = ", ".join(f"{n}단계" for n in chance_steps)
+                st.markdown(
+                    f"""
+<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
+            padding:10px 14px;margin:8px 0;color:#78350F;font-weight:600;">
+  🆘 이 실습에서 AI 찬스 사용 단계: <b>{steps_str}</b> (총 {len(chance_steps)}회, 감점 적용됨)
 </div>""",
                     unsafe_allow_html=True,
                 )
@@ -1400,11 +1586,14 @@ def render_teacher_mode() -> None:
         return
 
     # 통계 요약
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("등록된 학생 수", f"{len(students)} 명")
     col2.metric("총 실습 기록", f"{len(records)} 건")
     fb_done = sum(1 for r in records if (r.get("teacher_feedback") or "").strip())
     col3.metric("피드백 완료", f"{fb_done} / {len(records)} 건")
+    chance_total = sum(len(_parse_ai_chance_steps(r)) for r in records)
+    chance_records = sum(1 for r in records if _parse_ai_chance_steps(r))
+    col4.metric("AI 찬스 사용", f"{chance_records} 건 / {chance_total} 회")
 
     st.markdown("---")
 
@@ -1428,8 +1617,23 @@ def render_teacher_mode() -> None:
         when = (rec.get("submitted_at") or "")[:16]
         score = _safe_float(rec.get("ncs_score"))
         has_fb = bool((rec.get("teacher_feedback") or "").strip())
-        title = f"{icon} {unit} · {when} · {score:.0f}점 {'✅ 피드백 완료' if has_fb else '⏳ 피드백 필요'}"
+        chance_steps = _parse_ai_chance_steps(rec)
+        chance_tag = f" · 🆘 AI 찬스 {len(chance_steps)}회" if chance_steps else ""
+        title = (
+            f"{icon} {unit} · {when} · {score:.0f}점"
+            f" {'✅ 피드백 완료' if has_fb else '⏳ 피드백 필요'}{chance_tag}"
+        )
         with st.expander(title, expanded=False):
+            if chance_steps:
+                steps_str = ", ".join(f"{n}단계" for n in chance_steps)
+                st.markdown(
+                    f"""
+<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
+            padding:10px 14px;margin:0 0 10px 0;color:#78350F;font-weight:600;">
+  🆘 학생이 AI 찬스를 사용한 단계: <b>{steps_str}</b> (총 {len(chance_steps)}회, 평가 시 감점 적용됨)
+</div>""",
+                    unsafe_allow_html=True,
+                )
             st.markdown(f"**🔍 수행 내용**")
             st.code(rec.get("symptom") or "(없음)")
             if rec.get("reasoning"):
