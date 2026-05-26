@@ -1109,78 +1109,77 @@ def render_landing() -> None:
     st.markdown(
         """
 <style>
-.landing-wrap { max-width:760px; margin:1rem auto 0 auto; text-align:center; }
-.landing-hero { padding: 14px 0 6px 0; }
+.landing-wrap { max-width: 1000px; margin: 1.2rem auto 0 auto; text-align: center; }
+.landing-hero { padding: 18px 0 10px 0; }
 .landing-title {
-    font-size: 2.2rem; font-weight: 800; color: #1e3a8a; margin: 0;
+    font-size: 2.8rem; font-weight: 800; color: #1e3a8a; margin: 0;
     letter-spacing: -0.5px;
 }
-.landing-sub { color:#475569; font-size:1rem; margin:6px 0 0 0; }
-.landing-hint { color:#64748b; font-size:0.95rem; margin: 18px 0 14px 0; line-height:1.55; }
-.mode-cards { display:flex; gap:18px; justify-content:center; margin-top:8px; }
-.mode-card {
-    flex:1; min-width:220px; max-width:320px;
-    padding: 28px 22px; border-radius:18px; text-decoration:none;
-    box-shadow:0 6px 18px rgba(15,23,42,0.10);
-    border:2px solid transparent; display:block; text-align:center;
-    transition: transform .18s ease, box-shadow .18s ease;
+.landing-sub { color:#475569; font-size: 1.15rem; margin: 10px 0 0 0; }
+.landing-hint { color:#64748b; font-size: 1.05rem; margin: 24px 0 18px 0; line-height: 1.6; }
+
+.mode-cards {
+    display: flex; gap: 32px; justify-content: center; margin: 28px auto 0 auto;
+    max-width: 920px; flex-wrap: wrap;
 }
-.mode-card:hover { transform: translateY(-3px); box-shadow:0 14px 30px rgba(15,23,42,0.16); }
+.mode-card {
+    flex: 1 1 380px; min-width: 320px; max-width: 440px;
+    padding: 56px 32px;
+    border-radius: 24px; text-decoration: none !important;
+    box-shadow: 0 10px 28px rgba(15,23,42,0.12);
+    border: 3px solid transparent;
+    display: block; text-align: center;
+    transition: transform .22s ease, box-shadow .22s ease, filter .22s ease;
+    cursor: pointer;
+}
+.mode-card:hover {
+    transform: translateY(-6px) scale(1.02);
+    box-shadow: 0 22px 44px rgba(15,23,42,0.20);
+    filter: brightness(1.04);
+}
+.mode-card:active { transform: translateY(-2px) scale(1.01); }
+
 .mode-card-teacher {
     background: linear-gradient(160deg,#fffde7 0%,#fff59d 40%,#fdd835 100%);
-    border-color:#f9a825; color:#3e2723;
+    border-color: #f9a825; color: #3e2723 !important;
 }
 .mode-card-student {
     background: linear-gradient(160deg,#e3f2fd 0%,#90caf9 45%,#42a5f5 100%);
-    border-color:#1565c0; color:#0d47a1;
+    border-color: #1565c0; color: #0d47a1 !important;
 }
-.mode-card-label { font-size:1.25rem; font-weight:800; display:block; margin-bottom:6px; }
-.mode-card-desc { font-size:0.95rem; opacity:0.95; }
-.landing-foot { color:#94a3b8; font-size:0.85rem; margin-top:28px; }
+
+.mode-card-icon { font-size: 4.5rem; line-height: 1; display: block; margin-bottom: 14px; }
+.mode-card-label { font-size: 2.0rem; font-weight: 800; display: block; margin-bottom: 12px; }
+.mode-card-desc { font-size: 1.1rem; opacity: 0.95; line-height: 1.55; display: block; }
+
+.landing-foot { color:#94a3b8; font-size: 0.9rem; margin-top: 36px; }
 </style>
 <div class="landing-wrap">
   <div class="landing-hero">
     <h1 class="landing-title">🚗 자동차 고장진단 AI tutor</h1>
     <p class="landing-sub">자동차 전기전자제어 · NCS 수행준거 기반 학습 도우미</p>
   </div>
-  <p class="landing-hint">아래에서 역할을 선택해 주세요.<br/>선택한 역할은 세션 동안 유지되며, 사이드바에서 언제든 다시 바꿀 수 있어요.</p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+  <p class="landing-hint">
+    아래 카드를 클릭해 역할을 선택해 주세요.<br/>
+    선택한 역할은 세션 동안 유지되며, 사이드바에서 언제든 다시 바꿀 수 있어요.
+  </p>
 
-    _, c1, c2, _ = st.columns([1, 2, 2, 1])
-    with c1:
-        st.markdown(
-            """
-<div class="mode-card mode-card-teacher">
-  <span class="mode-card-label">🧑‍🏫 교사 모드</span>
-  <span class="mode-card-desc">학생 실습 기록 확인 · 피드백 작성</span>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-        if st.button("교사 모드로 진입", key="landing_btn_teacher",
-                     use_container_width=True, type="primary"):
-            st.session_state["app_role"] = "teacher"
-            st.rerun()
-    with c2:
-        st.markdown(
-            """
-<div class="mode-card mode-card-student">
-  <span class="mode-card-label">🧑‍🎓 학생 모드</span>
-  <span class="mode-card-desc">고장진단 실습 진행 · 포트폴리오 작성</span>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-        if st.button("학생 모드로 진입", key="landing_btn_student",
-                     use_container_width=True, type="primary"):
-            st.session_state["app_role"] = "student"
-            st.rerun()
+  <div class="mode-cards">
+    <a class="mode-card mode-card-teacher" href="?role=teacher" target="_self">
+      <span class="mode-card-icon">🧑‍🏫</span>
+      <span class="mode-card-label">교사 모드</span>
+      <span class="mode-card-desc">학생 실습 기록 확인<br/>· 피드백 작성 ·</span>
+    </a>
+    <a class="mode-card mode-card-student" href="?role=student" target="_self">
+      <span class="mode-card-icon">🧑‍🎓</span>
+      <span class="mode-card-label">학생 모드</span>
+      <span class="mode-card-desc">고장진단 실습 진행<br/>· 포트폴리오 작성 ·</span>
+    </a>
+  </div>
 
-    st.markdown(
-        '<p class="landing-foot" style="text-align:center;">NCS 수행준거 기반 · 소크라테스식 AI 학습 지원</p>',
+  <p class="landing-foot">NCS 수행준거 기반 · 소크라테스식 AI 학습 지원</p>
+</div>
+""",
         unsafe_allow_html=True,
     )
 
@@ -1197,6 +1196,19 @@ if "student_logged_in" not in st.session_state:
     st.session_state["student_logged_in"] = False
 if "teacher_logged_in" not in st.session_state:
     st.session_state["teacher_logged_in"] = False
+
+# 랜딩 카드 클릭(?role=teacher / ?role=student) → 세션에 반영 후 쿼리 정리
+try:
+    _qp_role = st.query_params.get("role")
+    if _qp_role in ("teacher", "student") and st.session_state["app_role"] is None:
+        st.session_state["app_role"] = _qp_role
+        try:
+            del st.query_params["role"]
+        except Exception:
+            pass
+        st.rerun()
+except Exception:
+    pass
 
 # ── 역할 미선택 → 랜딩 페이지 표시 ──────────────────────
 if st.session_state["app_role"] is None:
