@@ -1232,6 +1232,83 @@ def render_landing() -> None:
 # 메인 진입점
 # ───────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="자동차 고장진단 AI tutor", page_icon="🚗", layout="wide")
+
+# ── 전역 글자 크기 1.5배 업스케일 (사이드바 포함) ─────────────────
+st.markdown(
+    """
+<style>
+/* 본문 기본 폰트 1.5배 */
+html, body, [class*="st-emotion"], .stApp { font-size: 1.5rem !important; line-height: 1.65; }
+
+/* 헤딩 비례 확대 */
+.stApp h1 { font-size: 2.8rem !important; }
+.stApp h2 { font-size: 2.25rem !important; }
+.stApp h3 { font-size: 1.85rem !important; }
+.stApp h4 { font-size: 1.55rem !important; }
+.stApp h5 { font-size: 1.35rem !important; }
+.stApp h6 { font-size: 1.2rem !important; }
+
+/* 본문 단락·리스트 */
+.stMarkdown p, .stMarkdown li, .stMarkdown span,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span { font-size: 1.15rem !important; line-height: 1.7; }
+
+/* 입력 위젯 (텍스트·텍스트영역·셀렉트·숫자·날짜) */
+.stTextInput input, .stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] *,
+.stNumberInput input, .stDateInput input,
+.stMultiSelect div[data-baseweb="select"] * { font-size: 1.15rem !important; }
+
+/* 위젯 라벨 */
+.stTextInput label, .stTextArea label, .stSelectbox label,
+.stNumberInput label, .stDateInput label, .stMultiSelect label,
+.stRadio label, .stCheckbox label, .stFileUploader label,
+.stSlider label, .stColorPicker label
+{ font-size: 1.2rem !important; font-weight: 600 !important; }
+
+/* 라디오 옵션 라벨 */
+.stRadio div[role="radiogroup"] label p { font-size: 1.15rem !important; }
+
+/* 버튼 */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button,
+.stLinkButton button { font-size: 1.2rem !important; font-weight: 600; padding: 0.6rem 1.1rem !important; }
+
+/* 탭 */
+.stTabs [data-baseweb="tab"] { font-size: 1.25rem !important; font-weight: 600; }
+
+/* 메트릭/캡션/얼럿 */
+[data-testid="stMetricValue"] { font-size: 2.4rem !important; }
+[data-testid="stMetricLabel"] { font-size: 1.15rem !important; }
+[data-testid="stMetricDelta"] { font-size: 1.05rem !important; }
+[data-testid="stCaptionContainer"], .stCaption, small { font-size: 1.0rem !important; }
+[data-testid="stAlert"] p, [data-testid="stAlert"] div { font-size: 1.15rem !important; }
+[data-testid="stExpander"] summary p { font-size: 1.2rem !important; font-weight: 600; }
+[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li { font-size: 1.15rem !important; }
+.stDataFrame, .stTable { font-size: 1.05rem !important; }
+.stCode, pre, code { font-size: 1.05rem !important; }
+
+/* 사이드바 전체 1.5배 확대 */
+section[data-testid="stSidebar"] * { font-size: 1.15rem !important; }
+section[data-testid="stSidebar"] h1 { font-size: 1.9rem !important; }
+section[data-testid="stSidebar"] h2 { font-size: 1.6rem !important; }
+section[data-testid="stSidebar"] h3 { font-size: 1.4rem !important; }
+section[data-testid="stSidebar"] h4 { font-size: 1.25rem !important; }
+section[data-testid="stSidebar"] .stRadio label,
+section[data-testid="stSidebar"] .stSelectbox label,
+section[data-testid="stSidebar"] .stCheckbox label,
+section[data-testid="stSidebar"] .stTextInput label,
+section[data-testid="stSidebar"] .stButton button { font-size: 1.2rem !important; }
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+section[data-testid="stSidebar"] small { font-size: 1.0rem !important; }
+
+/* 진행 바 두께도 비례 확대 */
+.stProgress > div > div > div { height: 18px !important; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 shb.gsheets_available()
 
 # 세션 상태 초기화
