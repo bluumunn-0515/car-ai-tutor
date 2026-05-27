@@ -160,6 +160,11 @@ def reset_diagnosis_flow() -> None:
     st.session_state.latest_symptom = ""
     st.session_state.latest_reflection = ""
     st.session_state.latest_image_b64 = ""
+    # 평가 검토·재수행 관련 보류 상태 초기화
+    st.session_state["pending_record"] = None
+    st.session_state["pending_ncs_score"] = 0.0
+    st.session_state["previous_evaluation"] = ""
+    st.session_state["redo_count"] = 0
     # 4단계 미션 카드 상태 초기화
     for i in range(1, 5):
         for k in (
@@ -293,30 +298,88 @@ def build_learning_prompt(user_symptom: str, selected_unit: str) -> str:
 ✋ 생각해볼 점: (다음 행동을 학생이 직접 결정하도록 유도하는 1줄 질문)
 """.strip()
 
-def build_evaluation_prompt(user_symptom: str, student_reasoning: str, selected_unit: str, guidance_text: str) -> str:
-    """평가 결과를 학생 포트폴리오에서 박스형으로 깔끔하게 보여줄 수 있도록
-    아주 짧고 일정한 형식만 출력하게 한다. (줄글·이모지 금지)"""
+def build_evaluation_prompt(
+    user_symptom: str,
+    student_reasoning: str,
+    selected_unit: str,
+    guidance_text: str,
+    photo_order_text: str = "",
+) -> str:
+    """학생이 오늘 입력한 4단계 메모와 첨부 사진을 NCS 수행준거와 비교해
+    카테고리별로 구체적으로 분석하는 평가 프롬프트.
+    한 카테고리당 "사실 → NCS 기준 → 보완 제안" 3줄로 일정한 형식만 출력하게 한다."""
+    sub_elements = NCS_RUBRIC.get(selected_unit, [])
+    sub_lines: list[str] = []
+    for i, (name, keywords) in enumerate(sub_elements, 1):
+        kw = ", ".join(keywords[:8])
+        sub_lines.append(f"  {i}. {name} — {kw}")
+    sub_text = "\n".join(sub_lines) or "  (세부 수행준거 없음)"
+    photo_block = photo_order_text.strip() or "(첨부 사진 없음)"
+
     return f"""
-너는 평가 코치다. 학생의 4단계 실습 결과를 가이드와 비교해 간결하게 평가하라.
+너는 자동차 전기전자제어 NCS 수행준거 기반 평가 코치다.
+학생이 4단계로 진행한 실습 결과를 NCS 수행준거·처음 제공된 AI 가이드·첨부 사진과
+비교해 카테고리별로 구체적으로 평가한다.
+
 [단원] {selected_unit}
-[가이드] {guidance_text}
-[학생 결과] {student_reasoning}
+
+[NCS 하위 수행준거]
+{sub_text}
+
+[학생이 처음 입력한 증상]
+{user_symptom or '(없음)'}
+
+[처음 제공된 AI 가이드]
+{guidance_text or '(없음)'}
+
+[학생이 4단계에서 작성한 진행 메모]
+{student_reasoning}
+
+[첨부 사진 안내]
+{photo_block}
+- 위 순서대로 사진이 첨부되었다. 사진을 참조해 학생이 실제로 어떤 부품·계측기·회로를
+  확인했는지, 어떤 자세·도구로 측정했는지를 평가에 구체적으로 반영하라.
+- 사진이 없거나 분석이 어려운 경우는 "사진으로 확인 어려움"이라고 명시.
 
 [필수 규칙]
-- 줄글·장황한 설명 금지. 이모지·꾸밈문자 사용 금지.
-- 각 카테고리의 상태는 정확히 "통과" 또는 "보완" 둘 중 하나로만 표기.
-- 카테고리 코멘트는 30자 이내, 한 줄.
-- "한줄 요약"은 60자 이내, 한 줄.
-- 출력은 아래 형식만 그대로 출력. 머리말·맺음말·추가 설명 금지.
+1. 정답·고장 원인을 단정하지 말 것. (예: "이건 단선입니다" 금지)
+2. 한줄 요약은 70~110자 한 문장으로, 학생이 잘한 점과 보완점을 압축.
+3. 카테고리별로 반드시 다음 3줄을 모두 포함:
+   - 사실: 학생 메모/사진에서 확인한 구체 사실 1줄 (가능하면 짧게 인용)
+   - NCS 기준: 해당 수행준거와 비교한 성취 수준 1줄
+   - 보완 제안: 다음에 무엇을 더 측정/관찰해야 할지 1줄 (정답 단정 금지)
+4. 각 줄은 50자 이내. 줄글·장황한 설명 금지.
+5. 상태는 정확히 "통과" 또는 "보완" 둘 중 하나로만 표기.
+6. 이모지·꾸밈문자 사용 금지.
+7. 출력은 정확히 아래 형식만. 머리말·맺음말·추가 설명 금지.
 
 ## 한줄 요약
-(60자 이내 한 줄)
+(70~110자 한 문장)
 
 ## 카테고리 평가
-1. 준비/안전: 통과 — (30자 이내 핵심 코멘트)
-2. 점검/회로도: 보완 — (30자 이내 핵심 코멘트)
-3. 측정/전압: 통과 — (30자 이내 핵심 코멘트)
-4. 판정/조치: 보완 — (30자 이내 핵심 코멘트)
+
+### 1. 준비/안전 — 통과
+- 사실: (1줄)
+- NCS 기준: (1줄)
+- 보완 제안: (1줄)
+
+### 2. 점검/회로도 — 보완
+- 사실: (1줄)
+- NCS 기준: (1줄)
+- 보완 제안: (1줄)
+
+### 3. 측정/전압 — 통과
+- 사실: (1줄)
+- NCS 기준: (1줄)
+- 보완 제안: (1줄)
+
+### 4. 판정/조치 — 보완
+- 사실: (1줄)
+- NCS 기준: (1줄)
+- 보완 제안: (1줄)
+
+## 종합 코멘트
+(2~3줄: 학생의 강점과 개선 포인트, 다음 학습 방향)
 """.strip()
 
 _MISSION_STEP_META = [
@@ -490,6 +553,30 @@ def _detect_image_mime(image_file: Any) -> str:
         return "image/webp"
     return "image/jpeg"
 
+def _gather_evaluation_images() -> tuple[list[tuple[bytes, str]], list[str]]:
+    """현재 진행 중인 실습의 메인/단계별 썸네일을 raw bytes로 풀어 반환.
+    또한 사진의 의미(메인/1~4단계)를 설명하는 라벨도 함께 반환해 평가 프롬프트가
+    AI에 사진 순서를 알려줄 수 있게 한다."""
+    image_parts: list[tuple[bytes, str]] = []
+    descriptions: list[str] = []
+    main_b64 = (st.session_state.get("latest_image_b64") or "").strip()
+    if main_b64:
+        try:
+            image_parts.append((base64.b64decode(main_b64), "image/jpeg"))
+            descriptions.append("메인 증상 사진")
+        except Exception as e:
+            logger.warning("메인 사진 디코딩 실패: %s", e)
+    for i in range(1, 5):
+        b64 = (st.session_state.get(f"step_photo_b64_{i}") or "").strip()
+        if b64:
+            try:
+                image_parts.append((base64.b64decode(b64), "image/jpeg"))
+                descriptions.append(f"{i}단계 진행 사진")
+            except Exception as e:
+                logger.warning("%d단계 사진 디코딩 실패: %s", i, e)
+    return image_parts, descriptions
+
+
 def ask_gemini(
     user_symptom: str,
     student_reasoning: str,
@@ -498,8 +585,12 @@ def ask_gemini(
     selected_unit: str,
     step: str,
     guidance_text: str = "",
+    extra_image_parts: Optional[list[tuple[bytes, str]]] = None,
+    photo_order_text: str = "",
 ) -> str:
-    """Gemini API 호출. 실패 사유를 사람이 읽을 수 있는 형식으로 반환한다."""
+    """Gemini API 호출. 실패 사유를 사람이 읽을 수 있는 형식으로 반환한다.
+    평가 단계에서는 extra_image_parts(메인+단계 사진들)와 photo_order_text를 함께 전달해
+    AI가 사진을 보고 카테고리별로 분석할 수 있게 한다."""
     if genai is None or types is None:
         return ("❌ `google-genai` 패키지를 불러오지 못했습니다.\n"
                 "requirements.txt에 `google-genai`가 있는지 확인하고 다시 배포해 주세요.")
@@ -514,7 +605,10 @@ def ask_gemini(
         return f"❌ Gemini 클라이언트 초기화 실패: {type(e).__name__}: {e}"
 
     if step == "evaluation":
-        prompt = build_evaluation_prompt(user_symptom, student_reasoning, selected_unit, guidance_text)
+        prompt = build_evaluation_prompt(
+            user_symptom, student_reasoning, selected_unit, guidance_text,
+            photo_order_text=photo_order_text,
+        )
     else:
         prompt = build_learning_prompt(user_symptom, selected_unit)
 
@@ -527,6 +621,16 @@ def ask_gemini(
                 parts.append(types.Part.from_bytes(data=raw, mime_type=mime))
         except Exception as e:
             logger.warning("이미지 첨부 실패(텍스트만 진행): %s", e)
+    if extra_image_parts:
+        for raw, mime in extra_image_parts:
+            if not raw:
+                continue
+            try:
+                parts.append(types.Part.from_bytes(
+                    data=raw, mime_type=mime or "image/jpeg",
+                ))
+            except Exception as e:
+                logger.warning("추가 이미지 첨부 실패(스킵): %s", e)
 
     last_error = "(원인 미상)"
     for model_name in GEMINI_MODEL_CANDIDATES:
@@ -601,61 +705,118 @@ def _parse_category_scores(result_text: str) -> dict[str, int]:
     return scores
 
 
+def _extract_labeled_bullet(body: str, key_pattern: str) -> str:
+    """'- 사실: ...' 같은 라벨 불릿에서 값만 추출."""
+    if not body:
+        return ""
+    m = re.search(
+        rf"(?:^|\n)\s*[-•*]\s*{key_pattern}\s*[:：]\s*([^\n]+)",
+        body, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
 def _parse_evaluation_details(result_text: str) -> dict:
-    """평가 텍스트에서 한줄 요약과 카테고리별 (상태·코멘트)를 추출.
-    구·신 형식 모두 지원."""
+    """평가 텍스트에서 다음 항목들을 추출:
+    - summary: 한줄 요약
+    - overall: 종합 코멘트(있는 경우)
+    - categories: 카테고리별 {num, name, label, status, fact, ncs, improve, desc}
+    구·신 형식 모두 지원한다."""
     text = result_text or ""
 
-    # 1) 한줄 요약: '한줄 요약' 헤더 다음 줄 또는 ':' 뒤
+    # 1) 한줄 요약
     summary = ""
     m = re.search(r"##\s*[^\n]*?한줄\s*요약[^\n]*", text)
     if m:
         after = text[m.end():]
-        # 콜론 형식: "## 평가 한줄 요약: 이러쿵저러쿵"
         inline = re.match(r"\s*[:：]\s*([^\n]+)", after)
         if inline:
             summary = inline.group(1).strip()
         else:
-            # 다음 비어있지 않은 줄
             for ln in after.splitlines():
                 s = ln.strip()
                 if s and not s.startswith("#"):
                     summary = s
                     break
     if summary:
-        # 다음 ## 헤더 직전까지로 잘림 보호
         summary = re.split(r"\n\s*##|\n\s*###", summary, maxsplit=1)[0].strip()
-        # 앞쪽 잡문자 제거
         summary = summary.lstrip("-•*·").strip()
 
-    # 2) 카테고리별 상태·코멘트 — 구(이모지·괄호) 포맷과 신(숫자) 포맷 모두 지원
+    # 2) 종합 코멘트
+    overall = ""
+    m_overall = re.search(
+        r"##\s*[^\n]*?(?:종합\s*코멘트|총평|총\s*평|마무리)[^\n]*\n+([\s\S]+?)(?=\n\s*##|\Z)",
+        text,
+    )
+    if m_overall:
+        overall = m_overall.group(1).strip()
+        # 라인 시작의 잡문자 정리
+        overall_lines = []
+        for ln in overall.splitlines():
+            ln_s = ln.rstrip()
+            if ln_s.strip():
+                overall_lines.append(ln_s.lstrip("-•*·").strip())
+        overall = "\n".join(overall_lines).strip()
+
+    # 3) 카테고리별 상태·세부 분석
     categories: list[dict] = []
     for (num, name), (_icon, label) in zip(_CATEGORY_DISPLAY, _CATEGORY_LABELS):
         lab_pat = _CATEGORY_LABEL_PATTERNS.get(label, re.escape(label))
-        # 라벨로부터 같은 줄(120자 이내) 안에서 통과/보완/✅/⚠ 탐색
+        # ── (a) 새 포맷: ### 1. 준비/안전 — 통과 \n - 사실:... - NCS 기준:... - 보완 제안:...
+        block_pat = (
+            rf"###\s*\d*\.?\s*{lab_pat}[^\n]*?(통과|보완|✅|⚠)"
+            rf"([\s\S]+?)(?=\n\s*###|\n\s*##|\Z)"
+        )
+        mb = re.search(block_pat, text)
+        if mb:
+            tok = mb.group(1)
+            status = "통과" if (tok == "통과" or tok == "✅") else "보완"
+            body = mb.group(2)
+            fact = _extract_labeled_bullet(body, r"사실")
+            ncs = _extract_labeled_bullet(body, r"NCS\s*기준")
+            improve = _extract_labeled_bullet(body, r"보완\s*제안")
+            # body에 라벨 불릿이 없으면 첫 한 줄을 desc로 보조 노출
+            desc = ""
+            if not (fact or ncs or improve):
+                for ln in body.splitlines():
+                    ln_s = ln.strip().lstrip("-•*·").strip()
+                    if ln_s and not ln_s.startswith("#"):
+                        desc = ln_s
+                        break
+            categories.append({
+                "num": num, "name": name, "label": label, "status": status,
+                "fact": fact, "ncs": ncs, "improve": improve, "desc": desc,
+            })
+            continue
+
+        # ── (b) 구 포맷 호환: '준비/안전 ... 통과/보완 ... — 한줄 코멘트'
         pat_status = rf"{lab_pat}[^\n]{{0,120}}?(통과|보완|✅|⚠)"
         m2 = re.search(pat_status, text)
         if m2:
             tok = m2.group(1)
             status = "통과" if (tok == "통과" or tok == "✅") else "보완"
-            # 상태 토큰 이후의 같은 줄 나머지에서 — 또는 | 뒤의 코멘트 추출
             tail = text[m2.end():]
             tail_line = tail.split("\n", 1)[0]
             mdesc = re.search(r"[—\-–|]\s*([^\n]+)$", tail_line)
             desc = (mdesc.group(1) if mdesc else "").strip()
-            # 코멘트 앞·뒤 꾸밈/따옴표 제거 + 템플릿 잔재 정리
             desc = re.sub(r"^[\[\(『「\"'·•\-—–\s]+", "", desc)
             desc = re.sub(r"[\]\)』」\"']+$", "", desc).strip()
-            # 'X 통과/X 보완' 같은 템플릿 잔재면 비움
             if re.fullmatch(r"[\s/✅⚠통과보완]+", desc or ""):
                 desc = ""
-        else:
-            status = "미평가"
-            desc = ""
-        categories.append({"num": num, "name": name, "label": label,
-                           "status": status, "desc": desc})
+            categories.append({
+                "num": num, "name": name, "label": label, "status": status,
+                "fact": "", "ncs": "", "improve": "", "desc": desc,
+            })
+            continue
 
-    return {"summary": summary, "categories": categories}
+        categories.append({
+            "num": num, "name": name, "label": label, "status": "미평가",
+            "fact": "", "ncs": "", "improve": "", "desc": "",
+        })
+
+    return {"summary": summary, "overall": overall, "categories": categories}
 
 def _score_color(score: float) -> str:
     if score >= 85: return "#10B981"   # green
@@ -1056,6 +1217,43 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
     st.markdown("## 🧭 AI 진단 가이드 — 단계별 미션")
     st.caption("각 단계의 미션을 보고 직접 실습한 뒤, 진행 상황과 사진을 남겨주세요. AI는 정답을 알려주지 않고 힌트만 줘요.")
 
+    # 재수행 흐름: 직전 AI 평가를 참고용으로 가이드 상단에 노출
+    prev_eval = (st.session_state.get("previous_evaluation") or "").strip()
+    if prev_eval:
+        redo_count = int(st.session_state.get("redo_count", 0))
+        st.warning(
+            f"직전 AI 평가에서 보완할 점이 있었어요. (재수행 {redo_count}회차)\n"
+            "4단계 메모와 사진을 보완한 뒤 아래에서 다시 평가받아 주세요."
+        )
+        st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
+        with st.expander("이전 AI 평가 보기 (참고용)", expanded=False):
+            prev_details = _parse_evaluation_details(prev_eval)
+            prev_summary = (prev_details.get("summary") or "").strip()
+            if prev_summary:
+                st.markdown(
+                    f"""
+<div class="pf-summary">
+  <span class="tag">직전 AI 한줄 요약</span>
+  <div class="text">{_esc_html(prev_summary)}</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+            prev_cats = prev_details.get("categories") or []
+            if prev_cats:
+                st.markdown(_render_category_boxes_html(prev_cats),
+                            unsafe_allow_html=True)
+            prev_overall = (prev_details.get("overall") or "").strip()
+            if prev_overall:
+                st.markdown(
+                    f"""
+<div class="pf-overall">
+  <div class="head">직전 AI 종합 코멘트</div>
+  {_esc_html(prev_overall)}
+</div>""",
+                    unsafe_allow_html=True,
+                )
+        st.markdown("---")
+
     parsed_steps = _parse_mission_steps(st.session_state.get("latest_guidance", ""))
     # 4개를 채우지 못하면 기본 메타로 패딩
     steps: list[dict] = []
@@ -1186,11 +1384,15 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
     if not all_done:
         st.info("🔒 4단계를 모두 완료해야 결과 평가를 받을 수 있어요.")
 
+    btn_label = (
+        "다시 평가 받기" if prev_eval else "✅ 모든 단계 완료, AI 평가 받기"
+    )
     if st.button(
-        "✅ 모든 단계 완료, 결과 평가 받기",
+        btn_label,
         type="primary",
         use_container_width=True,
         disabled=not all_done,
+        key="run_evaluation_btn",
     ):
         # 단계별 메모 + AI 찬스 정보 통합
         reasoning_blocks = []
@@ -1219,18 +1421,29 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
             st.error("❌ Gemini API 키가 설정되어 있지 않습니다. 선생님께 문의해 주세요.")
             return
 
-        with st.spinner("🤖 AI가 4단계 실습 결과를 평가 중이에요..."):
+        # 메인 사진 + 단계별 사진을 모두 모아 AI 평가에 첨부
+        image_parts, image_descs = _gather_evaluation_images()
+        photo_order_text = (
+            "\n".join(f"- {idx + 1}번째 사진: {d}" for idx, d in enumerate(image_descs))
+            if image_descs else "(첨부 사진 없음)"
+        )
+
+        with st.spinner("🤖 AI가 4단계 메모와 사진을 NCS 기준으로 분석 중이에요..."):
             eval_res = ask_gemini(
                 st.session_state.latest_symptom, student_reasoning, None,
                 api_key, selected_unit, "evaluation",
                 st.session_state.latest_guidance,
+                extra_image_parts=image_parts,
+                photo_order_text=photo_order_text,
             )
         if (not eval_res) or eval_res.lstrip().startswith("❌"):
             st.error(eval_res or "AI 평가 응답을 받지 못했습니다.")
             return
 
+        # 아직 저장하지 않는다. 검토(evaluation) 단계로 넘어가 학생이
+        # "이대로 저장" 또는 "피드백 받고 다시 수행" 중 선택하도록 한다.
         import json as _json
-        record = {
+        pending_record = {
             "record_id": str(uuid.uuid4()),
             "submitted_at": now_kst_display(),
             "student_id": st.session_state.student_id,
@@ -1240,64 +1453,168 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
             "mode": "학습 모드",
             "symptom": st.session_state.latest_symptom,
             "reasoning": student_reasoning,
-            "result": _compose_combined_result(st.session_state.latest_guidance, eval_res),
+            "result": "",  # 저장 시점에 채워짐
             "reflection": refl,
             "image_b64": st.session_state.latest_image_b64,
-            "mission_step_photos_json": _json.dumps(photos_b64, ensure_ascii=False) if photos_b64 else "",
+            "mission_step_photos_json":
+                _json.dumps(photos_b64, ensure_ascii=False) if photos_b64 else "",
             "ai_chance_used_steps": ",".join(str(s) for s in ai_chance_steps),
             "teacher_feedback": "",
             "teacher_feedback_updated_at": "",
         }
-        # 포트폴리오가 읽는 키들을 그대로 가진 "로컬 record" — 시트 재조회 지연·실패와
-        # 무관하게 방금 한 수행평가가 곧바로 포트폴리오에 누적되어 보이도록 한다.
-        local_record = dict(record)
-        local_record["ncs_score"] = str(round(float(ncs_score), 2))
-        # datetime은 시트 컬럼명, submitted_at은 app 측 표준 키. 양쪽 모두 채워둔다.
-        local_record["datetime"] = local_record.get("submitted_at", "")
-        local_record["diagnosis_result"] = local_record.get("result", "")
-        local_record["name"] = local_record.get("student_display_name", "")
-
-        existing_records = list(st.session_state.get("my_history_records") or [])
-        # 낙관적 업데이트 — 시트 응답을 기다리지 않고 즉시 포트폴리오에 반영
-        st.session_state["my_history_records"] = existing_records + [local_record]
-
-        save_error: Optional[str] = None
-        try:
-            shb.append_history_from_record(record, ncs_score)
-            shb.invalidate_all_sheet_caches()
-        except Exception as _save_e:
-            logger.exception("history 저장 실패: %s", _save_e)
-            save_error = f"{type(_save_e).__name__}: {_save_e}"
-            # 저장이 실패했으면 낙관적 추가본을 되돌린다.
-            st.session_state["my_history_records"] = existing_records
-
-        # 시트 재조회는 "방금 저장한 row가 보일 때만" 로컬 목록을 교체한다.
-        # (구글 시트 반영 지연 시 stale 데이터로 덮어써서 오늘 기록이 사라지는 문제 방지)
-        if save_error is None:
-            try:
-                refreshed = shb.filter_history_records_by_student(
-                    st.session_state.student_id
-                )
-                rid = record.get("record_id")
-                if any((r.get("record_id") or "").strip() == rid for r in refreshed):
-                    st.session_state["my_history_records"] = refreshed
-                else:
-                    logger.info(
-                        "history 재조회에 방금 저장한 record_id가 아직 없어요 — "
-                        "로컬 누적본 유지(시트 반영 지연 가능성)."
-                    )
-            except Exception as _refresh_e:
-                logger.warning(
-                    "history 재조회 실패(로컬 누적본 유지): %s", _refresh_e
-                )
-
-        if save_error:
-            # rerun 후에도 학생이 분명히 알 수 있도록 세션에 남긴다.
-            st.session_state["_last_save_error"] = save_error
-
+        st.session_state["pending_record"] = pending_record
+        st.session_state["pending_ncs_score"] = float(ncs_score)
         st.session_state.latest_evaluation = eval_res
-        st.session_state.diag_step = "result"
+        st.session_state.diag_step = "evaluation"
         st.rerun()
+
+def _commit_pending_record() -> None:
+    """평가 검토 화면에서 '이대로 저장하기'를 눌렀을 때 호출.
+    pending_record + latest_evaluation을 합쳐 시트에 누적 저장하고 결과 단계로 이동."""
+    record = st.session_state.get("pending_record")
+    ncs_score = float(st.session_state.get("pending_ncs_score") or 0.0)
+    eval_text = st.session_state.get("latest_evaluation", "")
+    if not record:
+        st.error("저장할 기록이 없습니다. 이전 단계로 돌아가 다시 진행해 주세요.")
+        return
+
+    # 평가 텍스트를 최종 result에 합치기 (가이드 + 평가)
+    record["result"] = _compose_combined_result(
+        st.session_state.get("latest_guidance", ""), eval_text
+    )
+
+    # 포트폴리오 즉시 반영용 로컬 record
+    local_record = dict(record)
+    local_record["ncs_score"] = str(round(float(ncs_score), 2))
+    local_record["datetime"] = local_record.get("submitted_at", "")
+    local_record["diagnosis_result"] = local_record.get("result", "")
+    local_record["name"] = local_record.get("student_display_name", "")
+
+    existing_records = list(st.session_state.get("my_history_records") or [])
+    st.session_state["my_history_records"] = existing_records + [local_record]
+
+    save_error: Optional[str] = None
+    try:
+        shb.append_history_from_record(record, ncs_score)
+        shb.invalidate_all_sheet_caches()
+    except Exception as _save_e:
+        logger.exception("history 저장 실패: %s", _save_e)
+        save_error = f"{type(_save_e).__name__}: {_save_e}"
+        st.session_state["my_history_records"] = existing_records
+
+    if save_error is None:
+        try:
+            refreshed = shb.filter_history_records_by_student(
+                st.session_state.student_id
+            )
+            rid = record.get("record_id")
+            if any((r.get("record_id") or "").strip() == rid for r in refreshed):
+                st.session_state["my_history_records"] = refreshed
+        except Exception as _refresh_e:
+            logger.warning("history 재조회 실패(로컬 누적본 유지): %s", _refresh_e)
+
+    if save_error:
+        st.session_state["_last_save_error"] = save_error
+
+    # 보류·재수행 상태 정리
+    st.session_state["pending_record"] = None
+    st.session_state["pending_ncs_score"] = 0.0
+    st.session_state["previous_evaluation"] = ""
+    st.session_state["redo_count"] = 0
+    st.session_state.diag_step = "result"
+    st.rerun()
+
+
+def _render_evaluation_review(selected_unit: str, api_key: str) -> None:
+    """AI 평가 결과 검토 화면. 저장 전에 학생이 결과를 살펴보고
+    '피드백 받고 다시 수행' 또는 '이대로 저장' 중 하나를 선택한다."""
+    st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
+    eval_text = st.session_state.get("latest_evaluation", "") or ""
+
+    st.markdown("## 🤖 AI 수행평가 결과")
+    st.caption(
+        "AI가 오늘 작성한 4단계 메모와 첨부 사진을 NCS 수행준거와 비교해 분석한 결과예요. "
+        "결과가 부족하다고 느끼면 다시 수행해 더 정확한 결과를 받을 수 있어요."
+    )
+
+    details = _parse_evaluation_details(eval_text)
+
+    # 1) 한줄 요약 (강조 박스)
+    summary = (details.get("summary") or "").strip()
+    if summary:
+        st.markdown(
+            f"""
+<div class="pf-summary">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">{_esc_html(summary)}</div>
+</div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+<div class="pf-summary muted">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">요약을 추출하지 못했어요.</div>
+</div>""",
+            unsafe_allow_html=True,
+        )
+
+    # 2) 카테고리 4박스 (사실 / NCS 기준 / 보완 제안)
+    cats = details.get("categories") or []
+    if cats:
+        st.markdown(_render_category_boxes_html(cats), unsafe_allow_html=True)
+
+    # 3) 종합 코멘트
+    overall = (details.get("overall") or "").strip()
+    if overall:
+        st.markdown(
+            f"""
+<div class="pf-overall">
+  <div class="head">AI 종합 코멘트</div>
+  {_esc_html(overall)}
+</div>""",
+            unsafe_allow_html=True,
+        )
+
+    # 4) 두 갈래 버튼 — 다시 수행 / 이대로 저장
+    st.markdown("---")
+    st.caption(
+        "총평을 살펴봤어요. 결과가 마음에 들지 않으면 아래에서 다시 수행하고, "
+        "지금까지의 결과를 그대로 기록하려면 '이대로 저장하기'를 눌러주세요."
+    )
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button(
+            "🔁 피드백 받고 다시 수행하기",
+            use_container_width=True,
+            help="위 평가를 참고해 4단계 메모/사진을 보완한 뒤 다시 평가받을 수 있어요. (아직 저장되지 않음)",
+            key="redo_eval_btn",
+        ):
+            # 직전 평가를 가이드 화면 상단에 참고용으로 노출
+            st.session_state["previous_evaluation"] = eval_text
+            st.session_state["redo_count"] = int(
+                st.session_state.get("redo_count", 0)
+            ) + 1
+            # 다시 점검하도록 '단계 완료' 체크박스만 초기화 (메모·사진은 보존)
+            for i in range(1, 5):
+                st.session_state.pop(f"step_done_{i}", None)
+            # 평가·저장 보류 상태 비움
+            st.session_state["latest_evaluation"] = ""
+            st.session_state["pending_record"] = None
+            st.session_state["pending_ncs_score"] = 0.0
+            st.session_state.diag_step = "guidance"
+            st.rerun()
+    with c2:
+        if st.button(
+            "💾 이대로 저장하기 (포트폴리오에 누적)",
+            type="primary",
+            use_container_width=True,
+            help="현재 평가 결과를 오늘의 수행 결과로 포트폴리오에 누적 저장합니다.",
+            key="save_eval_btn",
+        ):
+            _commit_pending_record()
+
 
 def _render_diagnosis_input_tab(selected_unit: str, api_key: str):
     diag_step = st.session_state.get("diag_step", "input")
@@ -1391,6 +1708,9 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
     elif diag_step == "guidance":
         _render_mission_steps_ui(selected_unit, api_key)
 
+    elif diag_step == "evaluation":
+        _render_evaluation_review(selected_unit, api_key)
+
     elif diag_step == "result":
         save_err = st.session_state.pop("_last_save_error", None)
         if save_err:
@@ -1400,8 +1720,36 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
                 "선생님께 위 오류를 알려주세요. (구글 시트 권한 또는 일시적 네트워크 문제일 수 있어요.)"
             )
         else:
-            st.success("🎉 실습이 완료되어 **포트폴리오에 누적 기록**되었습니다!")
-        render_evaluation_card(st.session_state.latest_evaluation)
+            st.success("🎉 오늘의 수행평가가 **포트폴리오에 누적 기록**되었습니다!")
+        # 결과 단계에서는 한줄 요약 + 카테고리 박스 + 종합 코멘트로 다시 한 번 보여준다.
+        eval_text = st.session_state.get("latest_evaluation", "") or ""
+        if eval_text:
+            details = _parse_evaluation_details(eval_text)
+            summary = (details.get("summary") or "").strip()
+            if summary:
+                st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+<div class="pf-summary">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">{_esc_html(summary)}</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+            cats = details.get("categories") or []
+            if cats:
+                st.markdown(_render_category_boxes_html(cats),
+                            unsafe_allow_html=True)
+            overall = (details.get("overall") or "").strip()
+            if overall:
+                st.markdown(
+                    f"""
+<div class="pf-overall">
+  <div class="head">AI 종합 코멘트</div>
+  {_esc_html(overall)}
+</div>""",
+                    unsafe_allow_html=True,
+                )
         if st.button("🔄 새 진단 시작"):
             reset_diagnosis_flow()
             st.rerun()
@@ -1551,6 +1899,31 @@ _PORTFOLIO_CSS = """
 .pf-cat-desc {
     font-size:13px; color:#374151; font-weight:500;
     line-height:1.45; flex:1 1 0; min-width:0;
+}
+.pf-cat-lines { margin-top:6px; }
+.pf-cat-line {
+    font-size:13px; color:#1F2937; line-height:1.55;
+    margin-top:4px; word-break:keep-all;
+}
+.pf-cat-line b {
+    display:inline-block; min-width:62px; text-align:center;
+    color:#1E3A8A; font-weight:800; font-size:11px;
+    margin-right:8px; padding:2px 8px; border-radius:6px;
+    background:#EFF6FF; letter-spacing:0.3px; vertical-align:middle;
+}
+.pf-cat-line.fact b { background:#E0F2FE; color:#075985; }
+.pf-cat-line.ncs  b { background:#EDE9FE; color:#5B21B6; }
+.pf-cat-line.imp  b { background:#FEF3C7; color:#92400E; }
+
+/* 종합 코멘트 박스 */
+.pf-overall {
+    background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px;
+    padding:14px 18px; margin:12px 0;
+    color:#1F2937; font-size:14px; line-height:1.7; white-space:pre-wrap;
+}
+.pf-overall .head {
+    font-size:12px; font-weight:800; color:#6B7280;
+    letter-spacing:0.3px; margin-bottom:6px;
 }
 
 /* 카테고리 박스 좌측 강조선 색 — 통과는 초록, 보완은 주황, 미평가는 회색 */
@@ -1775,6 +2148,62 @@ def _esc_html(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _render_category_boxes_html(cats: list[dict]) -> str:
+    """카테고리 박스(4개)의 HTML을 한 덩어리로 만들어 반환.
+    각 박스에 사실/NCS 기준/보완 제안 3줄 분석이 있으면 함께 표시한다."""
+    box_html = '<div class="pf-cat-grid">'
+    for c in cats:
+        status = c.get("status", "미평가")
+        if status == "통과":
+            cls = "pass"; status_cls = "pf-cat-pass"
+        elif status == "보완":
+            cls = "warn"; status_cls = "pf-cat-warn"
+        else:
+            cls = "none"; status_cls = "pf-cat-none"
+
+        fact = c.get("fact") or ""
+        ncs = c.get("ncs") or ""
+        improve = c.get("improve") or ""
+        desc = c.get("desc") or ""
+
+        body_html = f'<div class="pf-cat-name">{_esc_html(c["name"])}</div>'
+        body_html += (
+            '<div class="pf-cat-row">'
+            f'<span class="pf-cat-status {status_cls}">{_esc_html(status)}</span>'
+            '</div>'
+        )
+        if fact or ncs or improve:
+            body_html += '<div class="pf-cat-lines">'
+            if fact:
+                body_html += (
+                    f'<div class="pf-cat-line fact"><b>사실</b>{_esc_html(fact)}</div>'
+                )
+            if ncs:
+                body_html += (
+                    f'<div class="pf-cat-line ncs"><b>NCS 기준</b>{_esc_html(ncs)}</div>'
+                )
+            if improve:
+                body_html += (
+                    f'<div class="pf-cat-line imp"><b>보완 제안</b>{_esc_html(improve)}</div>'
+                )
+            body_html += '</div>'
+        elif desc:
+            body_html += (
+                f'<div class="pf-cat-lines">'
+                f'<div class="pf-cat-line"><span class="pf-cat-desc">{_esc_html(desc)}</span></div>'
+                f'</div>'
+            )
+
+        box_html += (
+            f'<div class="pf-cat-box {cls}">'
+            f'<div class="pf-cat-num">{_esc_html(c["num"])}</div>'
+            f'<div class="pf-cat-body">{body_html}</div>'
+            '</div>'
+        )
+    box_html += '</div>'
+    return box_html
+
+
 def _render_record_card(rec: dict) -> None:
     unit = rec.get("unit", "")
     date = (rec.get("submitted_at") or "")[:10]
@@ -1834,31 +2263,23 @@ def _render_record_card(rec: dict) -> None:
                     unsafe_allow_html=True,
                 )
 
-            # ── 2) 카테고리 4박스 (숫자 1~4 + 통과/보완 + 한줄 코멘트) ──
+            # ── 2) 카테고리 4박스 (숫자 1~4 + 통과/보완 + 사실/NCS/보완 분석) ──
             cats = details.get("categories") or []
             if cats:
-                box_html = '<div class="pf-cat-grid">'
-                for c in cats:
-                    status = c.get("status", "미평가")
-                    if status == "통과":
-                        cls = "pass"; status_cls = "pf-cat-pass"
-                    elif status == "보완":
-                        cls = "warn"; status_cls = "pf-cat-warn"
-                    else:
-                        cls = "none"; status_cls = "pf-cat-none"
-                    desc = c.get("desc") or ""
-                    box_html += (
-                        f'<div class="pf-cat-box {cls}">'
-                        f'<div class="pf-cat-num">{_esc_html(c["num"])}</div>'
-                        f'<div class="pf-cat-body">'
-                        f'<div class="pf-cat-name">{_esc_html(c["name"])}</div>'
-                        f'<div class="pf-cat-row">'
-                        f'<span class="pf-cat-status {status_cls}">{_esc_html(status)}</span>'
-                        f'<span class="pf-cat-desc">{_esc_html(desc)}</span>'
-                        f'</div></div></div>'
-                    )
-                box_html += "</div>"
-                st.markdown(box_html, unsafe_allow_html=True)
+                st.markdown(_render_category_boxes_html(cats),
+                            unsafe_allow_html=True)
+
+            # ── 2-1) 종합 코멘트 ──
+            overall = (details.get("overall") or "").strip()
+            if overall:
+                st.markdown(
+                    f"""
+<div class="pf-overall">
+  <div class="head">AI 종합 코멘트</div>
+  {_esc_html(overall)}
+</div>""",
+                    unsafe_allow_html=True,
+                )
 
             # ── 3) 선생님 피드백 ──
             if has_fb:
