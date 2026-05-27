@@ -1125,15 +1125,53 @@ def _render_mission_steps_ui(selected_unit: str, api_key: str) -> None:
             "teacher_feedback": "",
             "teacher_feedback_updated_at": "",
         }
+        # 포트폴리오가 읽는 키들을 그대로 가진 "로컬 record" — 시트 재조회 지연·실패와
+        # 무관하게 방금 한 수행평가가 곧바로 포트폴리오에 누적되어 보이도록 한다.
+        local_record = dict(record)
+        local_record["ncs_score"] = str(round(float(ncs_score), 2))
+        # datetime은 시트 컬럼명, submitted_at은 app 측 표준 키. 양쪽 모두 채워둔다.
+        local_record["datetime"] = local_record.get("submitted_at", "")
+        local_record["diagnosis_result"] = local_record.get("result", "")
+        local_record["name"] = local_record.get("student_display_name", "")
+
+        existing_records = list(st.session_state.get("my_history_records") or [])
+        # 낙관적 업데이트 — 시트 응답을 기다리지 않고 즉시 포트폴리오에 반영
+        st.session_state["my_history_records"] = existing_records + [local_record]
+
+        save_error: Optional[str] = None
         try:
             shb.append_history_from_record(record, ncs_score)
             shb.invalidate_all_sheet_caches()
-            st.session_state["my_history_records"] = shb.filter_history_records_by_student(
-                st.session_state.student_id
-            )
         except Exception as _save_e:
             logger.exception("history 저장 실패: %s", _save_e)
-            st.warning(f"기록 저장에 실패했어요(평가는 정상): {_save_e}")
+            save_error = f"{type(_save_e).__name__}: {_save_e}"
+            # 저장이 실패했으면 낙관적 추가본을 되돌린다.
+            st.session_state["my_history_records"] = existing_records
+
+        # 시트 재조회는 "방금 저장한 row가 보일 때만" 로컬 목록을 교체한다.
+        # (구글 시트 반영 지연 시 stale 데이터로 덮어써서 오늘 기록이 사라지는 문제 방지)
+        if save_error is None:
+            try:
+                refreshed = shb.filter_history_records_by_student(
+                    st.session_state.student_id
+                )
+                rid = record.get("record_id")
+                if any((r.get("record_id") or "").strip() == rid for r in refreshed):
+                    st.session_state["my_history_records"] = refreshed
+                else:
+                    logger.info(
+                        "history 재조회에 방금 저장한 record_id가 아직 없어요 — "
+                        "로컬 누적본 유지(시트 반영 지연 가능성)."
+                    )
+            except Exception as _refresh_e:
+                logger.warning(
+                    "history 재조회 실패(로컬 누적본 유지): %s", _refresh_e
+                )
+
+        if save_error:
+            # rerun 후에도 학생이 분명히 알 수 있도록 세션에 남긴다.
+            st.session_state["_last_save_error"] = save_error
+
         st.session_state.latest_evaluation = eval_res
         st.session_state.diag_step = "result"
         st.rerun()
@@ -1229,7 +1267,15 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
         _render_mission_steps_ui(selected_unit, api_key)
 
     elif diag_step == "result":
-        st.success("🎉 실습이 완료되었습니다!")
+        save_err = st.session_state.pop("_last_save_error", None)
+        if save_err:
+            st.error(
+                "⚠ AI 평가는 정상적으로 완료되었지만, **수행평가 기록을 포트폴리오에 저장하지 못했습니다.**\n\n"
+                f"오류 내용: `{save_err}`\n\n"
+                "선생님께 위 오류를 알려주세요. (구글 시트 권한 또는 일시적 네트워크 문제일 수 있어요.)"
+            )
+        else:
+            st.success("🎉 실습이 완료되어 **포트폴리오에 누적 기록**되었습니다!")
         render_evaluation_card(st.session_state.latest_evaluation)
         if st.button("🔄 새 진단 시작"):
             reset_diagnosis_flow()
