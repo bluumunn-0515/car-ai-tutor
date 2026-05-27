@@ -294,18 +294,30 @@ def build_learning_prompt(user_symptom: str, selected_unit: str) -> str:
 """.strip()
 
 def build_evaluation_prompt(user_symptom: str, student_reasoning: str, selected_unit: str, guidance_text: str) -> str:
+    """평가 결과를 학생 포트폴리오에서 박스형으로 깔끔하게 보여줄 수 있도록
+    아주 짧고 일정한 형식만 출력하게 한다. (줄글·이모지 금지)"""
     return f"""
-너는 평가 코치다. 학생의 실습 결과를 가이드와 비교해 평가해라.
+너는 평가 코치다. 학생의 4단계 실습 결과를 가이드와 비교해 간결하게 평가하라.
 [단원] {selected_unit}
 [가이드] {guidance_text}
 [학생 결과] {student_reasoning}
-## 📋 평가 한줄 요약: ...
-## 🏷 카테고리 요약:
-• 🛡️ 준비 / 안전 — [✅ 통과/⚠ 보완] | ...
-• 🔍 점검 / 회로도 — [✅ 통과/⚠ 보완] | ...
-• ⚡ 측정 / 전압 — [✅ 통과/⚠ 보완] | ...
-• 🛠️ 판정 / 조치 — [✅ 통과/⚠ 보완] | ...
-"""
+
+[필수 규칙]
+- 줄글·장황한 설명 금지. 이모지·꾸밈문자 사용 금지.
+- 각 카테고리의 상태는 정확히 "통과" 또는 "보완" 둘 중 하나로만 표기.
+- 카테고리 코멘트는 30자 이내, 한 줄.
+- "한줄 요약"은 60자 이내, 한 줄.
+- 출력은 아래 형식만 그대로 출력. 머리말·맺음말·추가 설명 금지.
+
+## 한줄 요약
+(60자 이내 한 줄)
+
+## 카테고리 평가
+1. 준비/안전: 통과 — (30자 이내 핵심 코멘트)
+2. 점검/회로도: 보완 — (30자 이내 핵심 코멘트)
+3. 측정/전압: 통과 — (30자 이내 핵심 코멘트)
+4. 판정/조치: 보완 — (30자 이내 핵심 코멘트)
+""".strip()
 
 _MISSION_STEP_META = [
     {"emoji": "🛡️", "title": "준비 / 안전",  "color": "#10B981"},
@@ -550,6 +562,20 @@ _CATEGORY_LABELS = [
     ("⚡", "측정 / 전압"),
     ("🛠️", "판정 / 조치"),
 ]
+# 학생 포트폴리오에서 이모지 대신 보여줄 번호·짧은 이름.
+_CATEGORY_DISPLAY = [
+    ("1", "준비 / 안전"),
+    ("2", "점검 / 회로도"),
+    ("3", "측정 / 전압"),
+    ("4", "판정 / 조치"),
+]
+# 라벨 매칭은 공백·슬래시 변형까지 모두 허용해야 한다.
+_CATEGORY_LABEL_PATTERNS = {
+    "준비 / 안전":  r"준비\s*[/／]\s*안전",
+    "점검 / 회로도": r"점검\s*[/／]\s*회로도",
+    "측정 / 전압":  r"측정\s*[/／]\s*전압",
+    "판정 / 조치":  r"판정\s*[/／]\s*조치",
+}
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
     try:
@@ -558,18 +584,78 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
         return default
 
 def _parse_category_scores(result_text: str) -> dict[str, int]:
-    """평가 결과 텍스트에서 카테고리별 통과/보완 여부를 파싱해 점수(100/60/0)로 환산."""
+    """평가 결과 텍스트에서 카테고리별 통과/보완 여부를 파싱해 점수(100/60/0)로 환산.
+    구·신 형식 모두 지원: '통과'/'보완' 한국어 또는 ✅/⚠ 이모지."""
     scores: dict[str, int] = {}
     text = result_text or ""
     for _icon, label in _CATEGORY_LABELS:
-        # 라벨 뒤의 첫 ✅ 또는 ⚠ 한 줄 안에서만 탐색
-        pattern = rf"{re.escape(label)}[^\n]{{0,80}}?(✅|⚠)"
+        lab_pat = _CATEGORY_LABEL_PATTERNS.get(label, re.escape(label))
+        # 라벨 뒤 한 줄 안에서 통과/보완 키워드(또는 ✅/⚠) 탐색
+        pattern = rf"{lab_pat}[^\n]{{0,120}}?(통과|보완|✅|⚠)"
         m = re.search(pattern, text)
         if m:
-            scores[label] = 100 if m.group(1) == "✅" else 60
+            tok = m.group(1)
+            scores[label] = 100 if (tok == "통과" or tok == "✅") else 60
         else:
             scores[label] = 0
     return scores
+
+
+def _parse_evaluation_details(result_text: str) -> dict:
+    """평가 텍스트에서 한줄 요약과 카테고리별 (상태·코멘트)를 추출.
+    구·신 형식 모두 지원."""
+    text = result_text or ""
+
+    # 1) 한줄 요약: '한줄 요약' 헤더 다음 줄 또는 ':' 뒤
+    summary = ""
+    m = re.search(r"##\s*[^\n]*?한줄\s*요약[^\n]*", text)
+    if m:
+        after = text[m.end():]
+        # 콜론 형식: "## 평가 한줄 요약: 이러쿵저러쿵"
+        inline = re.match(r"\s*[:：]\s*([^\n]+)", after)
+        if inline:
+            summary = inline.group(1).strip()
+        else:
+            # 다음 비어있지 않은 줄
+            for ln in after.splitlines():
+                s = ln.strip()
+                if s and not s.startswith("#"):
+                    summary = s
+                    break
+    if summary:
+        # 다음 ## 헤더 직전까지로 잘림 보호
+        summary = re.split(r"\n\s*##|\n\s*###", summary, maxsplit=1)[0].strip()
+        # 앞쪽 잡문자 제거
+        summary = summary.lstrip("-•*·").strip()
+
+    # 2) 카테고리별 상태·코멘트 — 구(이모지·괄호) 포맷과 신(숫자) 포맷 모두 지원
+    categories: list[dict] = []
+    for (num, name), (_icon, label) in zip(_CATEGORY_DISPLAY, _CATEGORY_LABELS):
+        lab_pat = _CATEGORY_LABEL_PATTERNS.get(label, re.escape(label))
+        # 라벨로부터 같은 줄(120자 이내) 안에서 통과/보완/✅/⚠ 탐색
+        pat_status = rf"{lab_pat}[^\n]{{0,120}}?(통과|보완|✅|⚠)"
+        m2 = re.search(pat_status, text)
+        if m2:
+            tok = m2.group(1)
+            status = "통과" if (tok == "통과" or tok == "✅") else "보완"
+            # 상태 토큰 이후의 같은 줄 나머지에서 — 또는 | 뒤의 코멘트 추출
+            tail = text[m2.end():]
+            tail_line = tail.split("\n", 1)[0]
+            mdesc = re.search(r"[—\-–|]\s*([^\n]+)$", tail_line)
+            desc = (mdesc.group(1) if mdesc else "").strip()
+            # 코멘트 앞·뒤 꾸밈/따옴표 제거 + 템플릿 잔재 정리
+            desc = re.sub(r"^[\[\(『「\"'·•\-—–\s]+", "", desc)
+            desc = re.sub(r"[\]\)』」\"']+$", "", desc).strip()
+            # 'X 통과/X 보완' 같은 템플릿 잔재면 비움
+            if re.fullmatch(r"[\s/✅⚠통과보완]+", desc or ""):
+                desc = ""
+        else:
+            status = "미평가"
+            desc = ""
+        categories.append({"num": num, "name": name, "label": label,
+                           "status": status, "desc": desc})
+
+    return {"summary": summary, "categories": categories}
 
 def _score_color(score: float) -> str:
     if score >= 85: return "#10B981"   # green
@@ -1331,7 +1417,6 @@ _PORTFOLIO_CSS = """
 .pf-hero h2 { margin:0; font-size:30px; font-weight:800; letter-spacing:-0.3px; }
 .pf-hero p { margin:8px 0 0 0; opacity:0.92; font-size:16px; }
 
-/* 4개 통계 카드 — 크고 또렷하게 */
 .pf-stats {
     display:grid; grid-template-columns: repeat(4, 1fr);
     gap:14px; margin-top:20px;
@@ -1352,7 +1437,7 @@ _PORTFOLIO_CSS = """
 }
 .pf-stat .help-mark:hover { background:rgba(255,255,255,0.55); color:#1E3A8A; }
 
-/* ── 선생님 피드백 카드 — 글씨 크게 ── */
+/* ── 선생님 피드백 카드 ── */
 .pf-fb-card {
     background:#FFF7E6; border-left:8px solid #FA8C16;
     border-radius:12px; padding:16px 22px; margin:10px 0;
@@ -1369,47 +1454,163 @@ _PORTFOLIO_CSS = """
     padding:16px; border-radius:10px; text-align:center; font-size:16px;
 }
 
+/* ── 단원별 진척도 그리드 (6단원) ── */
+.pf-units-grid {
+    display:grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap:12px; margin:6px 0 8px 0;
+}
+.pf-unit-cell {
+    position:relative;
+    box-sizing:border-box; padding:14px 16px;
+    border-radius:14px; text-align:center;
+    font-weight:700; font-size:17px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.04);
+    word-break:keep-all; line-height:1.4;
+}
+.pf-unit-cell .count {
+    display:block; margin-top:6px; font-size:13px; font-weight:500; opacity:0.85;
+}
+.pf-unit-cell .badge {
+    position:absolute; top:8px; right:10px;
+    font-size:12px; font-weight:800; padding:3px 8px; border-radius:999px;
+}
+.pf-unit-done { background:#ECFDF5; color:#065F46; border:1.5px solid #6EE7B7; }
+.pf-unit-done .badge { background:#065F46; color:#ECFDF5; }
+.pf-unit-todo { background:#FEF2F2; color:#991B1B; border:1.5px solid #FCA5A5; }
+.pf-unit-todo .badge { background:#9CA3AF; color:#FFFFFF; }
+
 /* ── 실습 기록 카드 ── */
 .pf-record {
     border:1px solid #E5E7EB; border-radius:14px;
-    padding:16px 18px; margin-bottom:14px; background:#fff;
+    padding:14px 18px; margin-bottom:12px; background:#fff;
     box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }
 .pf-rec-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.pf-rec-title { font-size:27px; font-weight:800; color:#111827; letter-spacing:-0.2px; }
-.pf-rec-date { font-size:20px; color:#4B5563; margin-top:4px; font-weight:500; }
-.pf-chip { display:inline-block; padding:6px 14px; border-radius:999px;
-    font-size:15px; font-weight:700; margin-left:4px; }
+.pf-rec-title { font-size:22px; font-weight:800; color:#111827; letter-spacing:-0.2px; }
+.pf-rec-date { font-size:15px; color:#4B5563; margin-top:2px; font-weight:500; }
+.pf-chip { display:inline-block; padding:4px 12px; border-radius:999px;
+    font-size:13px; font-weight:700; margin-left:4px; }
 .pf-chip-fb { background:#DBEAFE; color:#1D4ED8; }
 .pf-chip-wait { background:#F3F4F6; color:#6B7280; }
 .pf-chip-chance { background:#FEF3C7; color:#92400E; }
 .pf-score {
-    display:inline-block; padding:6px 14px; border-radius:10px;
-    font-weight:800; font-size:15px; color:#fff;
+    display:inline-block; padding:5px 14px; border-radius:10px;
+    font-weight:800; font-size:14px; color:#fff;
 }
 
-/* ── 카테고리 평가 박스(주황/색상) — 글씨 크게, 이모지 제거 ── */
+/* ── 한줄 요약: 매우 크고 눈에 띄게 ── */
+.pf-summary {
+    background:linear-gradient(135deg,#1E40AF 0%,#2563EB 60%,#3B82F6 100%);
+    border-radius:14px; padding:18px 22px; margin:14px 0 12px 0;
+    color:#FFFFFF; box-shadow:0 4px 14px rgba(30,64,175,0.25);
+}
+.pf-summary .tag {
+    display:inline-block; background:rgba(255,255,255,0.22);
+    padding:3px 10px; border-radius:999px;
+    font-size:12px; font-weight:700; letter-spacing:0.5px;
+}
+.pf-summary .text {
+    margin-top:8px; font-size:22px; font-weight:800; line-height:1.45;
+    letter-spacing:-0.2px;
+}
+.pf-summary.muted {
+    background:#F3F4F6; color:#6B7280; box-shadow:none;
+}
+.pf-summary.muted .tag { background:#E5E7EB; color:#4B5563; }
+.pf-summary.muted .text { color:#6B7280; font-weight:600; }
+
+/* ── 카테고리 4박스: 숫자 강조 + 통과/보완 + 한줄 코멘트 ── */
 .pf-cat-grid {
-    display:grid; grid-template-columns: repeat(4, 1fr);
-    gap:10px; margin:14px 0 8px 0;
+    display:grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap:10px; margin:10px 0 6px 0;
 }
 .pf-cat-box {
-    border-radius:12px; padding:14px 12px; text-align:center;
-    box-shadow:0 1px 2px rgba(0,0,0,0.05);
+    border-radius:12px; padding:12px 14px;
+    background:#FFFFFF; border:1.5px solid #E5E7EB;
+    display:flex; gap:12px; align-items:flex-start;
+    box-shadow:0 1px 2px rgba(0,0,0,0.04);
 }
-.pf-cat-box .label { font-size:15px; font-weight:700; opacity:0.95; }
-.pf-cat-box .status { font-size:22px; font-weight:800; margin-top:8px; letter-spacing:0.5px; }
+.pf-cat-num {
+    flex:0 0 auto;
+    width:38px; height:38px; border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:800; color:#FFFFFF;
+}
+.pf-cat-body { flex:1 1 auto; min-width:0; }
+.pf-cat-name { font-size:14px; font-weight:700; color:#1F2937; }
+.pf-cat-row {
+    display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;
+}
+.pf-cat-status {
+    display:inline-block; padding:3px 10px; border-radius:999px;
+    font-size:12px; font-weight:800;
+}
+.pf-cat-pass { background:#ECFDF5; color:#065F46; }
+.pf-cat-warn { background:#FFFBEB; color:#92400E; }
+.pf-cat-none { background:#F3F4F6; color:#6B7280; }
+.pf-cat-desc {
+    font-size:13px; color:#374151; font-weight:500;
+    line-height:1.45; flex:1 1 0; min-width:0;
+}
 
-/* ── AI 평가 요약 박스 ── */
-.pf-eval-summary {
-    background:linear-gradient(135deg,#EFF6FF 0%,#DBEAFE 100%);
-    border-left:8px solid #2563EB; border-radius:12px;
-    padding:16px 20px; margin:10px 0; color:#1E3A8A;
+/* 카테고리 박스 좌측 강조선 색 — 통과는 초록, 보완은 주황, 미평가는 회색 */
+.pf-cat-box.pass { border-left:5px solid #10B981; }
+.pf-cat-box.warn { border-left:5px solid #F59E0B; }
+.pf-cat-box.none { border-left:5px solid #D1D5DB; }
+.pf-cat-box.pass .pf-cat-num { background:#10B981; }
+.pf-cat-box.warn .pf-cat-num { background:#F59E0B; }
+.pf-cat-box.none .pf-cat-num { background:#9CA3AF; }
+
+/* ── 작은 정보 블록(증상/소감 등) — 검은 코드블록 대체 ── */
+.pf-info {
+    background:#F9FAFB; border:1px solid #E5E7EB; border-radius:10px;
+    padding:10px 14px; margin:4px 0 8px 0;
+    color:#1F2937; font-size:14px; line-height:1.65;
+    white-space:pre-wrap; word-break:break-word;
 }
-.pf-eval-summary .head { font-size:14px; font-weight:700; color:#1D4ED8; margin-bottom:6px; }
-.pf-eval-summary .body { font-size:18px; line-height:1.7; font-weight:600; }
+.pf-info-label {
+    font-size:12px; font-weight:700; color:#6B7280;
+    letter-spacing:0.3px; margin-bottom:2px;
+}
 </style>
 """
+
+def _render_unit_progress_section(records: list[dict]) -> None:
+    """6개 NCS 단원 각각 한 번이라도 수행평가를 완료했는지 한눈에 보여준다."""
+    st.markdown("### 단원별 진척도")
+    unit_counts: dict[str, int] = {}
+    for r in records:
+        u = (r.get("unit") or "").strip()
+        if u:
+            unit_counts[u] = unit_counts.get(u, 0) + 1
+
+    done = sum(1 for u in NCS_UNITS if u in unit_counts)
+    total = len(NCS_UNITS)
+    st.caption(f"전체 {total}단원 중 **{done}단원** 완료 ({done * 100 // total}%)")
+    st.progress(done / total if total else 0.0)
+
+    grid = '<div class="pf-units-grid">'
+    for unit in NCS_UNITS:
+        cnt = unit_counts.get(unit, 0)
+        if cnt > 0:
+            grid += (
+                '<div class="pf-unit-cell pf-unit-done">'
+                '<span class="badge">완료</span>'
+                f'<div>{_esc_html(unit)}</div>'
+                f'<span class="count">{cnt}회 수행</span>'
+                '</div>'
+            )
+        else:
+            grid += (
+                '<div class="pf-unit-cell pf-unit-todo">'
+                '<span class="badge">미완료</span>'
+                f'<div>{_esc_html(unit)}</div>'
+                '<span class="count">아직 수행 전</span>'
+                '</div>'
+            )
+    grid += "</div>"
+    st.markdown(grid, unsafe_allow_html=True)
+
 
 def _render_teacher_feedback_section(records: list[dict]) -> None:
     st.markdown("### 선생님의 피드백")
@@ -1551,15 +1752,9 @@ def _extract_evaluation_only(result_text: str) -> str:
     return result_text.strip()
 
 def _parse_evaluation_summary(evaluation_text: str) -> dict:
-    """평가 텍스트에서 한줄 요약·카테고리 상태를 추출."""
-    text = evaluation_text or ""
-    summary = ""
-    m = re.search(r"평가\s*한줄\s*요약[:：]?\s*(.+)", text)
-    if m:
-        summary = m.group(1).strip()
-        # 다음 헤더까지만
-        summary = re.split(r"\n\s*##|\n\s*###", summary, maxsplit=1)[0].strip()
-    return {"summary": summary}
+    """기존 호출자 호환용 — 새 통합 파서에서 summary 부분만 돌려준다."""
+    details = _parse_evaluation_details(evaluation_text)
+    return {"summary": details.get("summary", "")}
 
 def _parse_ai_chance_steps(rec: dict) -> list[int]:
     """기록에서 AI 찬스 사용 단계 번호 목록을 안전하게 파싱."""
@@ -1576,6 +1771,10 @@ def _parse_ai_chance_steps(rec: dict) -> list[int]:
             continue
     return sorted(set(out))
 
+def _esc_html(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _render_record_card(rec: dict) -> None:
     unit = rec.get("unit", "")
     date = (rec.get("submitted_at") or "")[:10]
@@ -1588,18 +1787,19 @@ def _render_record_card(rec: dict) -> None:
                '<span class="pf-chip pf-chip-wait">피드백 대기</span>')
     chance_steps = _parse_ai_chance_steps(rec)
     chance_chip = (
-        f'<span class="pf-chip pf-chip-chance">AI 찬스 {len(chance_steps)}회 · 감점</span>'
+        f'<span class="pf-chip pf-chip-chance">AI 찬스 {len(chance_steps)}회</span>'
         if chance_steps else ""
     )
 
     with st.container():
+        # ── 카드 헤더 (단원·날짜·점수·뱃지) ──
         st.markdown(
             f"""
 <div class="pf-record">
   <div class="pf-rec-head">
     <div>
-      <div class="pf-rec-title">{unit}</div>
-      <div class="pf-rec-date">{date}</div>
+      <div class="pf-rec-title">{_esc_html(unit)}</div>
+      <div class="pf-rec-date">{_esc_html(date)}</div>
     </div>
     <div style="text-align:right;">
       <div class="pf-score" style="background:{color};">{score:.0f}점 · {band}</div>
@@ -1609,82 +1809,107 @@ def _render_record_card(rec: dict) -> None:
 </div>""",
             unsafe_allow_html=True,
         )
+
         with st.expander("상세 보기"):
+            # ── 1) 한줄 요약 (가장 크고 강조) ──
+            eval_only = _extract_evaluation_only(rec.get("result", ""))
+            details = _parse_evaluation_details(eval_only)
+            summary = details.get("summary") or ""
+            if summary:
+                st.markdown(
+                    f"""
+<div class="pf-summary">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">{_esc_html(summary)}</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    """
+<div class="pf-summary muted">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">요약을 추출하지 못했어요.</div>
+</div>""",
+                    unsafe_allow_html=True,
+                )
+
+            # ── 2) 카테고리 4박스 (숫자 1~4 + 통과/보완 + 한줄 코멘트) ──
+            cats = details.get("categories") or []
+            if cats:
+                box_html = '<div class="pf-cat-grid">'
+                for c in cats:
+                    status = c.get("status", "미평가")
+                    if status == "통과":
+                        cls = "pass"; status_cls = "pf-cat-pass"
+                    elif status == "보완":
+                        cls = "warn"; status_cls = "pf-cat-warn"
+                    else:
+                        cls = "none"; status_cls = "pf-cat-none"
+                    desc = c.get("desc") or ""
+                    box_html += (
+                        f'<div class="pf-cat-box {cls}">'
+                        f'<div class="pf-cat-num">{_esc_html(c["num"])}</div>'
+                        f'<div class="pf-cat-body">'
+                        f'<div class="pf-cat-name">{_esc_html(c["name"])}</div>'
+                        f'<div class="pf-cat-row">'
+                        f'<span class="pf-cat-status {status_cls}">{_esc_html(status)}</span>'
+                        f'<span class="pf-cat-desc">{_esc_html(desc)}</span>'
+                        f'</div></div></div>'
+                    )
+                box_html += "</div>"
+                st.markdown(box_html, unsafe_allow_html=True)
+
+            # ── 3) 선생님 피드백 ──
             if has_fb:
                 st.markdown(
                     f"""
 <div class="pf-fb-card">
   <div class="pf-fb-head"><span>선생님 피드백</span></div>
-  <div class="pf-fb-body">{(rec.get('teacher_feedback') or '').strip()}</div>
+  <div class="pf-fb-body">{_esc_html((rec.get('teacher_feedback') or '').strip())}</div>
 </div>""",
                     unsafe_allow_html=True,
                 )
 
+            # ── 4) AI 찬스 사용 안내 ──
             if chance_steps:
                 steps_str = ", ".join(f"{n}단계" for n in chance_steps)
                 st.markdown(
                     f"""
-<div style="background:#FFFBEB;border-left:6px solid #D97706;border-radius:12px;
-            padding:14px 18px;margin:10px 0;color:#78350F;font-weight:600;font-size:16px;">
-  이 실습에서 AI 찬스 사용 단계: <b>{steps_str}</b> (총 {len(chance_steps)}회, 감점 적용됨)
+<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
+            padding:10px 14px;margin:8px 0;color:#78350F;font-weight:600;font-size:14px;">
+  AI 찬스 사용 단계: <b>{steps_str}</b> · 총 {len(chance_steps)}회 (감점 적용)
 </div>""",
                     unsafe_allow_html=True,
                 )
 
-            # ── 4분면 카테고리 평가 카드 (이모지 제거, 글씨 크게) ──
-            cat_scores = _parse_category_scores(rec.get("result", ""))
-            if any(cat_scores.values()):
-                box_html = '<div class="pf-cat-grid">'
-                for _ico, label in _CATEGORY_LABELS:
-                    sc = cat_scores.get(label, 0)
-                    bg = _score_color(sc) if sc else "#F3F4F6"
-                    fg = "#FFFFFF" if sc else "#9CA3AF"
-                    status_text = (
-                        "통과" if sc >= 100 else ("보완 필요" if sc >= 60 else "미평가")
-                    )
-                    box_html += (
-                        f'<div class="pf-cat-box" style="background:{bg};color:{fg};">'
-                        f'<div class="label">{label}</div>'
-                        f'<div class="status">{status_text}</div>'
-                        '</div>'
-                    )
-                box_html += "</div>"
-                st.markdown(box_html, unsafe_allow_html=True)
-
-            # ── AI 평가 한줄 요약 (간결·직관) ──
-            eval_only = _extract_evaluation_only(rec.get("result", ""))
-            summary_info = _parse_evaluation_summary(eval_only)
-            summary = summary_info.get("summary") or ""
-            if summary:
-                st.markdown(
-                    f"""
-<div class="pf-eval-summary">
-  <div class="head">AI 평가 한줄 요약</div>
-  <div class="body">{summary}</div>
-</div>""",
-                    unsafe_allow_html=True,
-                )
-
-            # ── 탭(이모지 제거) ──
-            tab1, tab2, tab3 = st.tabs(["수행 내용", "나의 소감", "AI 평가 원문"])
-            with tab1:
+            # ── 5) 내가 입력한 내용 / 사진 / 소감 (접힌 채로) ──
+            with st.expander("내가 입력한 내용 보기", expanded=False):
                 if rec.get("symptom"):
-                    st.markdown("**입력한 증상**")
-                    st.code(rec.get("symptom"), language=None)
+                    st.markdown('<div class="pf-info-label">수행 내용</div>',
+                                unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="pf-info">{_esc_html(rec.get("symptom",""))}</div>',
+                        unsafe_allow_html=True,
+                    )
                 if rec.get("reasoning"):
-                    st.markdown("**내가 작성한 진단**")
-                    st.write(rec.get("reasoning"))
+                    st.markdown('<div class="pf-info-label">내가 작성한 진단</div>',
+                                unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="pf-info">{_esc_html(rec.get("reasoning",""))}</div>',
+                        unsafe_allow_html=True,
+                    )
+                refl = (rec.get("reflection") or "").strip()
+                if refl:
+                    st.markdown('<div class="pf-info-label">나의 소감</div>',
+                                unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="pf-info">{_esc_html(refl)}</div>',
+                        unsafe_allow_html=True,
+                    )
                 img_bytes = thumbnail_b64_to_bytes(rec.get("image_b64"))
                 if img_bytes:
-                    st.image(img_bytes, width=280)
-            with tab2:
-                refl = rec.get("reflection") or "(소감 없음)"
-                st.info(refl)
-            with tab3:
-                if eval_only:
-                    st.markdown(eval_only)
-                else:
-                    st.caption("AI 평가 원문이 없습니다.")
+                    st.image(img_bytes, width=260)
 
 def _render_final_portfolio_section(records: list[dict]) -> None:
     """학기말 최종 포트폴리오 다운로드 영역. 6개 단원을 모두 완료해야 활성화된다."""
@@ -1697,64 +1922,22 @@ def _render_final_portfolio_section(records: list[dict]) -> None:
     progress = len(done_units) / len(required_units) if required_units else 0.0
 
     if missing_units:
+        missing_str = ", ".join(missing_units)
         st.warning(
-            f"📌 학기말 최종 포트폴리오는 **6개 단원 모두 최소 1개씩 수행평가를 완료**해야 생성할 수 있어요. "
-            f"현재 **{len(done_units)} / {len(required_units)} 단원** 완료했어요!"
+            f"학기말 최종 포트폴리오는 **6개 단원 모두 최소 1개씩 수행평가를 완료**해야 생성할 수 있어요. "
+            f"현재 **{len(done_units)} / {len(required_units)} 단원** 완료했습니다."
         )
         st.progress(progress, text=f"단원 완료율 {progress * 100:.0f}%")
-
-        with st.container(border=True):
-            st.markdown("**단원별 완료 현황**")
-            grid_html = """
-<style>
-.unit-grid {
-    display:grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap:12px; margin: 6px 0 4px 0;
-}
-.unit-cell {
-    height: 90px; box-sizing: border-box;
-    display:flex; flex-direction:column; justify-content:center; align-items:center;
-    padding: 8px 14px; border-radius: 12px;
-    text-align: center; font-weight: 700; font-size: 17px;
-    overflow: hidden; word-break: keep-all;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-}
-.unit-cell .name { line-height:1.3; }
-.unit-cell .sub { font-size: 13px; font-weight: 500; opacity: 0.85; margin-top: 4px; }
-.unit-done { background:#ECFDF5; color:#065F46; border:1.5px solid #6EE7B7; }
-.unit-todo { background:#FEF2F2; color:#991B1B; border:1.5px solid #FCA5A5; }
-</style>
-<div class="unit-grid">
-"""
-            for unit in required_units:
-                if unit in completed_units:
-                    grid_html += (
-                        '<div class="unit-cell unit-done">'
-                        f'<div class="name">{unit}</div>'
-                        '<div class="sub">완료</div>'
-                        '</div>'
-                    )
-                else:
-                    grid_html += (
-                        '<div class="unit-cell unit-todo">'
-                        f'<div class="name">{unit}</div>'
-                        '<div class="sub">아직 미완료</div>'
-                        '</div>'
-                    )
-            grid_html += "</div>"
-            st.markdown(grid_html, unsafe_allow_html=True)
-            st.caption(f"남은 단원 {len(missing_units)}개를 완료하면 PDF 다운로드 버튼이 활성화돼요.")
-
+        st.caption(f"남은 단원: {missing_str}")
         st.button(
-            "🎓 학기말 최종 포트폴리오 생성 (PDF)",
+            "학기말 최종 포트폴리오 생성 (PDF)",
             type="primary", disabled=True, use_container_width=True,
             help="6개 단원의 수행평가를 모두 완료해야 활성화됩니다.",
         )
         return
 
-    # 6개 단원을 모두 완료한 경우
-    st.success("🎉 6개 단원의 수행평가를 모두 완료했어요! 이제 학기말 최종 포트폴리오를 생성할 수 있어요.")
-    if st.button("🎓 학기말 최종 포트폴리오 생성 (PDF)", type="primary", use_container_width=True):
+    st.success("6개 단원의 수행평가를 모두 완료했어요! 학기말 최종 포트폴리오를 생성할 수 있습니다.")
+    if st.button("학기말 최종 포트폴리오 생성 (PDF)", type="primary", use_container_width=True):
         with st.spinner("PDF를 생성하고 있어요..."):
             pdf_bytes = build_comprehensive_portfolio_pdf(
                 st.session_state.student_id, st.session_state.student_display_name, records
@@ -1769,7 +1952,7 @@ def _render_final_portfolio_section(records: list[dict]) -> None:
     pdf_cached = st.session_state.get("_final_pdf_bytes")
     if pdf_cached:
         st.download_button(
-            "💾 PDF 다운로드", data=pdf_cached,
+            "PDF 다운로드", data=pdf_cached,
             file_name=f"Final_Portfolio_{st.session_state.student_id}.pdf",
             mime="application/pdf", use_container_width=True,
         )
@@ -1823,11 +2006,15 @@ def _render_portfolio_view():
     _render_teacher_feedback_section(records)
 
     st.markdown("")
-    # ── ② 분야별 성취도 그래프 ────────────────────────
+    # ── ② 단원별 진척도 (6단원 완료 현황) ────────────
+    _render_unit_progress_section(records)
+
+    st.markdown("")
+    # ── ③ 분야별 성취도 그래프 ────────────────────────
     _render_achievement_charts(records)
 
     st.markdown("---")
-    # ── ③ 실습 기록 카드 목록 ─────────────────────────
+    # ── ④ 실습 기록 카드 목록 ─────────────────────────
     st.markdown("### 실습 기록")
     sort_opt = st.radio(
         "정렬", ["최신순", "성취도 높은 순", "단원별"],
@@ -1844,7 +2031,7 @@ def _render_portfolio_view():
         _render_record_card(rec)
 
     st.markdown("---")
-    # ── ④ 최종 PDF 다운로드 (6개 단원 모두 완료 시에만 활성화) ─────
+    # ── ⑤ 최종 PDF 다운로드 (6개 단원 모두 완료 시에만 활성화) ─────
     _render_final_portfolio_section(records)
 
 def render_student_mode():
