@@ -2167,6 +2167,28 @@ def _parse_evaluation_summary(evaluation_text: str) -> dict:
     details = _parse_evaluation_details(evaluation_text)
     return {"summary": details.get("summary", "")}
 
+def _parse_step_photos_json(raw: str) -> list[tuple[int, str]]:
+    """mission_step_photos_json을 [(step_num, b64), ...] 형태로 안전 파싱."""
+    if not raw:
+        return []
+    try:
+        import json as _json
+        data = _json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    out: list[tuple[int, str]] = []
+    for k, v in data.items():
+        try:
+            n = int(str(k).strip())
+        except (ValueError, TypeError):
+            continue
+        if 1 <= n <= 4 and isinstance(v, str) and v.strip():
+            out.append((n, v))
+    return sorted(out, key=lambda x: x[0])
+
+
 def _parse_ai_chance_steps(rec: dict) -> list[int]:
     """기록에서 AI 찬스 사용 단계 번호 목록을 안전하게 파싱."""
     raw = (rec.get("ai_chance_used_steps") or "").strip()
@@ -2540,11 +2562,194 @@ def render_teacher_login() -> None:
         else:
             st.error("비밀번호가 올바르지 않습니다.")
 
+def _render_teacher_record_detail(rec: dict, student_name: str) -> None:
+    """교사 모드에서 학생 한 건의 수행평가 결과를 5개 섹션으로 명확하게 보여준다.
+    섹션 구성:
+      1. 학생 수행평가 총평 (AI 한줄 요약, 100자 내외)
+      2. AI 수행평가 결과 분석 및 평가 (종합 코멘트 + 평가 원문)
+      3. 학생의 수행평가 입력 내용 및 사진 (입력·메모·소감·사진)
+      4. 카테고리별 성취 수준 (4박스: 통과/보완 + 사실/NCS/보완 제안)
+      5. 선생님의 피드백 및 평가 (기존 피드백 표시 + 작성/수정 + 저장)
+    """
+    eval_only = _extract_evaluation_only(rec.get("result", ""))
+    details = _parse_evaluation_details(eval_only)
+    summary = (details.get("summary") or "").strip()
+    overall = (details.get("overall") or "").strip()
+    cats = details.get("categories") or []
+    chance_steps = _parse_ai_chance_steps(rec)
+    unit = rec.get("unit", "")
+    when = (rec.get("submitted_at") or "")[:16]
+    score = _safe_float(rec.get("ncs_score"))
+
+    # 헤더 메타 (점수·찬스)
+    chance_tag = f" · AI 찬스 {len(chance_steps)}회" if chance_steps else ""
+    st.caption(f"단원: {unit}  ·  제출 {when}  ·  성취도 {score:.0f}점{chance_tag}")
+
+    # ── 섹션 1: 학생의 수행평가 총평 ──────────────────────
+    st.markdown(f"### 1. {student_name} 학생의 수행평가 총평")
+    if summary:
+        st.markdown(
+            f"""
+<div class="pf-summary">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">{_esc_html(summary)}</div>
+</div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+<div class="pf-summary muted">
+  <span class="tag">AI 한줄 요약</span>
+  <div class="text">한줄 요약을 추출하지 못했습니다.</div>
+</div>""",
+            unsafe_allow_html=True,
+        )
+
+    # ── 섹션 2: AI 수행평가 결과 분석 및 평가 ────────────
+    st.markdown("### 2. AI 수행평가 결과 분석 및 평가")
+    if overall:
+        st.markdown(
+            f"""
+<div class="pf-overall">
+  <div class="head">AI 종합 코멘트</div>
+  {_esc_html(overall)}
+</div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("AI 종합 코멘트가 없습니다.")
+    if chance_steps:
+        steps_str = ", ".join(f"{n}단계" for n in chance_steps)
+        st.markdown(
+            f"""
+<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
+            padding:10px 14px;margin:8px 0 4px 0;color:#78350F;font-weight:600;
+            font-size:15px;">
+  학생이 AI 찬스를 사용한 단계: <b>{steps_str}</b> · 총 {len(chance_steps)}회 (감점 적용됨)
+</div>""",
+            unsafe_allow_html=True,
+        )
+    with st.expander("AI 평가 원문 보기", expanded=False):
+        result_text = (rec.get("result") or "").strip() or "(AI 평가 없음)"
+        st.markdown(result_text)
+
+    # ── 섹션 3: 학생의 수행평가 입력 내용 및 사진 ────────
+    st.markdown("### 3. 학생의 수행평가 입력 내용 및 사진")
+    sym = (rec.get("symptom") or "").strip()
+    if sym:
+        st.markdown(
+            '<div class="pf-info-label">수행 내용 (대상 부품 · 현재 상태 · 학습 질문)</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="pf-info">{_esc_html(sym)}</div>',
+            unsafe_allow_html=True,
+        )
+    main_img = thumbnail_b64_to_bytes(rec.get("image_b64"))
+    if main_img:
+        st.markdown('<div class="pf-info-label">메인 사진</div>',
+                    unsafe_allow_html=True)
+        st.image(main_img, width=320)
+
+    reasoning = (rec.get("reasoning") or "").strip()
+    if reasoning:
+        st.markdown('<div class="pf-info-label">4단계 진행 메모</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="pf-info">{_esc_html(reasoning)}</div>',
+            unsafe_allow_html=True,
+        )
+
+    step_photos = _parse_step_photos_json(rec.get("mission_step_photos_json", ""))
+    if step_photos:
+        st.markdown('<div class="pf-info-label">단계별 진행 사진</div>',
+                    unsafe_allow_html=True)
+        cols = st.columns(min(4, len(step_photos)))
+        for idx, (n, b64) in enumerate(step_photos):
+            img_bytes = thumbnail_b64_to_bytes(b64)
+            if not img_bytes:
+                continue
+            with cols[idx % len(cols)]:
+                st.image(img_bytes, caption=f"{n}단계",
+                         use_container_width=True)
+
+    refl = (rec.get("reflection") or "").strip()
+    if refl:
+        st.markdown('<div class="pf-info-label">학생 소감</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="pf-info">{_esc_html(refl)}</div>',
+            unsafe_allow_html=True,
+        )
+    if not (sym or main_img or reasoning or step_photos or refl):
+        st.caption("학생이 입력한 내용이 없습니다.")
+
+    # ── 섹션 4: 카테고리별 성취 수준 ──────────────────────
+    st.markdown("### 4. 카테고리별 성취 수준")
+    if cats:
+        st.markdown(_render_category_boxes_html(cats), unsafe_allow_html=True)
+    else:
+        st.caption("카테고리별 분석을 추출하지 못했습니다.")
+
+    # ── 섹션 5: 선생님의 피드백 및 평가 ──────────────────
+    st.markdown("### 5. 선생님의 피드백 및 평가")
+    rid = (rec.get("record_id") or "").strip()
+    current_fb = (rec.get("teacher_feedback") or "").strip()
+
+    if current_fb:
+        updated = (rec.get("teacher_feedback_updated_at") or "")[:16]
+        st.markdown(
+            f"""
+<div class="pf-fb-card">
+  <div class="pf-fb-head">
+    <span>현재 등록된 피드백</span>
+    <span style="font-weight:500;font-size:14px;color:#9A6B00;">{_esc_html(updated)}</span>
+  </div>
+  <div class="pf-fb-body">{_esc_html(current_fb)}</div>
+</div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="pf-fb-empty">아직 피드백이 등록되지 않았어요. 아래 칸에 작성해 주세요.</div>',
+            unsafe_allow_html=True,
+        )
+
+    if not rid:
+        st.warning("이 기록은 record_id가 없어 피드백 저장이 불가합니다.")
+        return
+
+    new_fb = st.text_area(
+        "피드백 작성 / 수정", value=current_fb, key=f"fb_{rid}", height=140,
+        placeholder="예: 멀티미터 측정 절차를 정확히 따랐어요. 다음에는 접지 측정도 추가해 보세요.",
+    )
+    save_col, info_col = st.columns([1, 3])
+    with save_col:
+        if st.button("💾 피드백 저장", key=f"save_{rid}", type="primary"):
+            try:
+                shb.update_teacher_feedback_in_sheet(
+                    rid, new_fb.strip(), now_kst_display()
+                )
+                shb.invalidate_all_sheet_caches()
+                st.success("피드백이 저장되었습니다.")
+                st.rerun()
+            except Exception as e:
+                logger.exception("피드백 저장 실패: %s", e)
+                st.error(f"저장 실패: {e}")
+    with info_col:
+        updated_at = (rec.get("teacher_feedback_updated_at") or "").strip()
+        if updated_at:
+            st.caption(f"최근 저장: {updated_at}")
+
+
 def render_teacher_mode() -> None:
     teacher_name = (st.session_state.get("teacher_display_name") or "").strip()
     header_suffix = f" — {teacher_name} 선생님" if teacher_name else ""
     st.header(f"🧑‍🏫 교사 대시보드{header_suffix}")
     st.caption("학생들의 실습 기록을 확인하고 피드백을 남길 수 있습니다.")
+    # 학생 포트폴리오와 같은 박스/요약/피드백 스타일을 그대로 사용
+    st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
 
     try:
         df = shb.force_refresh_history()
@@ -2597,8 +2802,8 @@ def render_teacher_mode() -> None:
     student_records.sort(key=lambda r: r.get("submitted_at", ""), reverse=True)
     st.markdown(f"#### 📒 {students[sel_sid] or '(이름 미상)'} 학생의 실습 기록 ({len(student_records)}건)")
 
+    student_name = students[sel_sid] or "(이름 미상)"
     for rec in student_records:
-        rid = (rec.get("record_id") or "").strip()
         unit = rec.get("unit", "")
         icon = UNIT_ICONS.get(unit, "📘")
         when = (rec.get("submitted_at") or "")[:16]
@@ -2611,57 +2816,7 @@ def render_teacher_mode() -> None:
             f" {'✅ 피드백 완료' if has_fb else '⏳ 피드백 필요'}{chance_tag}"
         )
         with st.expander(title, expanded=False):
-            if chance_steps:
-                steps_str = ", ".join(f"{n}단계" for n in chance_steps)
-                st.markdown(
-                    f"""
-<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
-            padding:10px 14px;margin:0 0 10px 0;color:#78350F;font-weight:600;">
-  🆘 학생이 AI 찬스를 사용한 단계: <b>{steps_str}</b> (총 {len(chance_steps)}회, 평가 시 감점 적용됨)
-</div>""",
-                    unsafe_allow_html=True,
-                )
-            st.markdown(f"**🔍 수행 내용**")
-            st.code(rec.get("symptom") or "(없음)")
-            if rec.get("reasoning"):
-                st.markdown("**🧪 학생이 작성한 진단**")
-                st.write(rec.get("reasoning"))
-            if rec.get("reflection"):
-                st.markdown("**📝 학생 소감**")
-                st.info(rec.get("reflection"))
-            img_bytes = thumbnail_b64_to_bytes(rec.get("image_b64"))
-            if img_bytes:
-                st.image(img_bytes, width=280)
-            with st.expander("🤖 AI 평가 보기", expanded=False):
-                st.markdown(rec.get("result") or "(AI 평가 없음)")
-
-            st.markdown("---")
-            st.markdown("**💬 교사 피드백 작성**")
-            if not rid:
-                st.warning("이 기록은 record_id가 없어 피드백 저장이 불가합니다.")
-                continue
-            current_fb = rec.get("teacher_feedback") or ""
-            new_fb = st.text_area(
-                "피드백 내용", value=current_fb, key=f"fb_{rid}", height=120,
-                placeholder="예: 멀티미터 측정 절차를 정확히 따랐어요. 다음에는 접지 측정도 추가해 보세요.",
-            )
-            save_col, info_col = st.columns([1, 3])
-            with save_col:
-                if st.button("💾 피드백 저장", key=f"save_{rid}", type="primary"):
-                    try:
-                        shb.update_teacher_feedback_in_sheet(
-                            rid, new_fb.strip(), now_kst_display()
-                        )
-                        shb.invalidate_all_sheet_caches()
-                        st.success("피드백이 저장되었습니다.")
-                        st.rerun()
-                    except Exception as e:
-                        logger.exception("피드백 저장 실패: %s", e)
-                        st.error(f"저장 실패: {e}")
-            with info_col:
-                updated = rec.get("teacher_feedback_updated_at") or ""
-                if updated:
-                    st.caption(f"최근 저장: {updated}")
+            _render_teacher_record_detail(rec, student_name)
 
 # ───────────────────────────────────────────────────────────────────────────
 # 랜딩(역할 선택) 페이지
