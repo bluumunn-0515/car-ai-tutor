@@ -176,18 +176,55 @@ def compose_structured_symptom(target_part: str, current_state: str, learning_qu
     if not (target or state or question): return ""
     return f"[대상 부품]\n{target or '(미입력)'}\n[현재 상태]\n{state or '(미입력)'}\n[학습 질문]\n{question or '(미입력)'}"
 
-def make_thumbnail_b64(image_file: Any) -> str:
-    if image_file is None or PILImage is None: return ""
+# 구글 시트는 셀당 최대 50,000자만 허용한다.
+# - 메인 사진 한 장은 한 셀(image_b64)을 단독으로 사용 → 넉넉히 45,000자까지 허용.
+# - 4단계 미션 사진들은 mission_step_photos_json 한 셀에 묶여 들어가므로
+#   장당 11,000자 정도로 제한해야 4장 + JSON 오버헤드가 50,000자 안쪽이 된다.
+THUMB_B64_LIMIT_MAIN = 45000
+THUMB_B64_LIMIT_STEP = 11000
+
+# 점진적으로 크기/품질을 낮추며 base64 길이를 한도 이하로 맞추는 시도 시퀀스.
+_THUMB_SHRINK_STEPS = [
+    (480, 60), (400, 55), (340, 50), (280, 45),
+    (240, 40), (200, 35), (170, 32), (140, 30),
+    (110, 28), (90, 25),
+]
+
+def make_thumbnail_b64(image_file: Any, max_b64_chars: int = THUMB_B64_LIMIT_STEP) -> str:
+    """업로드 사진을 base64 썸네일로 변환. 구글 시트 셀 한도(50,000자)에 안전하게 들어가도록
+    크기·품질을 점진적으로 줄이며 max_b64_chars 이하가 될 때까지 재시도한다."""
+    if image_file is None or PILImage is None:
+        return ""
     try:
         raw = image_file.getvalue()
+    except Exception:
+        return ""
+    last_b64 = ""
+    try:
         with PILImage.open(BytesIO(raw)) as im:
             im.load()
-            if im.mode != "RGB": im = im.convert("RGB")
-            im.thumbnail((480, 480), PILImage.LANCZOS)
-            buf = BytesIO()
-            im.save(buf, format="JPEG", quality=60)
-            return base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception: return ""
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            for size, q in _THUMB_SHRINK_STEPS:
+                im_try = im.copy()
+                im_try.thumbnail((size, size), PILImage.LANCZOS)
+                buf = BytesIO()
+                im_try.save(buf, format="JPEG", quality=q, optimize=True)
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                last_b64 = b64
+                if len(b64) <= max_b64_chars:
+                    return b64
+        # 가장 작은 시도가 여전히 한도를 넘으면 빈 문자열로 폴백(저장이 막히는 일을 막는다).
+        if last_b64 and len(last_b64) > max_b64_chars:
+            logger.warning(
+                "썸네일이 한도(%d자)에 못 들어가 빈 값으로 폴백 — 마지막 시도 %d자",
+                max_b64_chars, len(last_b64),
+            )
+            return ""
+        return last_b64
+    except Exception as e:
+        logger.warning("썸네일 생성 실패: %s", e)
+        return ""
 
 def thumbnail_b64_to_bytes(b64: str) -> Optional[bytes]:
     if not b64: return None
@@ -1259,7 +1296,9 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
                     else:
                         st.session_state.latest_guidance = guide
                         st.session_state.latest_symptom = symptom
-                        st.session_state.latest_image_b64 = make_thumbnail_b64(img)
+                        st.session_state.latest_image_b64 = make_thumbnail_b64(
+                            img, max_b64_chars=THUMB_B64_LIMIT_MAIN
+                        )
                         st.session_state.diag_step = "guidance"
                         st.rerun()
 

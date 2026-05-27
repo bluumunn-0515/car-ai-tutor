@@ -46,6 +46,35 @@ HISTORY_COLS = [
 
 _CACHE_TTL_SEC = 60.0
 
+# 구글 시트는 셀당 최대 50,000자를 허용한다. 약간의 안전 마진을 두고 자른다.
+_GSHEETS_CELL_LIMIT = 49500
+# 이미지/JSON처럼 잘라 쓰면 깨지는 필드는 한도 초과 시 통째로 비운다.
+_BINARY_LIKE_FIELDS = {"image_b64", "mission_step_photos_json"}
+
+
+def _clip_value_for_sheet_cell(field: str, value: Any) -> str:
+    """구글 시트 셀 한도(50,000자)에 안전하게 들어가도록 값을 정리한다.
+
+    - 이미지/JSON 같은 바이너리성 필드는 잘라내면 깨지므로 비운다.
+    - 일반 텍스트 필드는 한도 직전까지 자르고 잘림 안내 마커를 덧붙인다.
+    """
+    s = "" if value is None else str(value)
+    if len(s) <= _GSHEETS_CELL_LIMIT:
+        return s
+    if field in _BINARY_LIKE_FIELDS:
+        logger.warning(
+            "필드 %s가 셀 한도 %d자를 초과(%d자)하여 비웠습니다.",
+            field, _GSHEETS_CELL_LIMIT, len(s),
+        )
+        return ""
+    marker = f"\n…(이하 생략 — 셀 한도 초과로 {len(s) - _GSHEETS_CELL_LIMIT}자 잘림)"
+    cut = max(0, _GSHEETS_CELL_LIMIT - len(marker))
+    logger.warning(
+        "필드 %s가 셀 한도 %d자를 초과(%d자)하여 잘랐습니다.",
+        field, _GSHEETS_CELL_LIMIT, len(s),
+    )
+    return s[:cut] + marker
+
 
 def _normalize_sheet_student_id(raw: Any) -> str:
     """시트·입력 학번을 매칭용 문자열로 통일 (int/float/str, '202601.0' 형태 방어)."""
@@ -266,6 +295,8 @@ def append_history_from_record(record: dict[str, Any], ncs_score: float) -> None
         "mission_step_photos_json": record.get("mission_step_photos_json", ""),
         "ai_chance_used_steps": record.get("ai_chance_used_steps", ""),
     }
+    # 셀 한도(50,000자) 초과로 인한 시트 거절을 방지하는 마지막 안전망.
+    row = {k: _clip_value_for_sheet_cell(k, v) for k, v in row.items()}
     _append_rows_via_update(SHEET_HISTORY, HISTORY_COLS, [row])
     st.session_state.pop("_gs_history_df", None)
     st.session_state.pop("_gs_history_ts", None)
