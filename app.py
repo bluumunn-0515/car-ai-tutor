@@ -1531,7 +1531,7 @@ def _render_evaluation_review(selected_unit: str, api_key: str) -> None:
     st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
     eval_text = st.session_state.get("latest_evaluation", "") or ""
 
-    st.markdown("## 🤖 AI 수행평가 결과")
+    st.markdown("## Today 수행평가 결과")
     st.caption(
         "AI가 오늘 작성한 4단계 메모와 첨부 사진을 NCS 수행준거와 비교해 분석한 결과예요. "
         "결과가 부족하다고 느끼면 다시 수행해 더 정확한 결과를 받을 수 있어요."
@@ -1577,16 +1577,37 @@ def _render_evaluation_review(selected_unit: str, api_key: str) -> None:
             unsafe_allow_html=True,
         )
 
-    # 4) 두 갈래 버튼 — 다시 수행 / 이대로 저장
+    # 4) 두 갈래 버튼 — 다시 수행 / 이대로 저장 (같은 크기로 통일)
     st.markdown("---")
     st.caption(
         "총평을 살펴봤어요. 결과가 마음에 들지 않으면 아래에서 다시 수행하고, "
         "지금까지의 결과를 그대로 기록하려면 '이대로 저장하기'를 눌러주세요."
     )
-    c1, c2 = st.columns([1, 1])
+    st.markdown(
+        """
+<style>
+/* 평가 검토 화면 하단의 두 버튼을 정확히 같은 크기로 통일 */
+div[class*="st-key-redo_eval_btn"] .stButton button,
+div[class*="st-key-save_eval_btn"] .stButton button {
+    height: 72px !important;
+    min-height: 72px !important;
+    font-size: 1.2rem !important;
+    font-weight: 800 !important;
+    padding: 0 18px !important;
+    white-space: nowrap !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+    c1, c2 = st.columns(2, gap="medium")
     with c1:
         if st.button(
-            "🔁 피드백 받고 다시 수행하기",
+            "🔁 다시 수행하기",
             use_container_width=True,
             help="위 평가를 참고해 4단계 메모/사진을 보완한 뒤 다시 평가받을 수 있어요. (아직 저장되지 않음)",
             key="redo_eval_btn",
@@ -1607,7 +1628,7 @@ def _render_evaluation_review(selected_unit: str, api_key: str) -> None:
             st.rerun()
     with c2:
         if st.button(
-            "💾 이대로 저장하기 (포트폴리오에 누적)",
+            "💾 이대로 저장하기",
             type="primary",
             use_container_width=True,
             help="현재 평가 결과를 오늘의 수행 결과로 포트폴리오에 누적 저장합니다.",
@@ -1867,63 +1888,63 @@ _PORTFOLIO_CSS = """
 .pf-summary.muted .tag { background:#E5E7EB; color:#4B5563; }
 .pf-summary.muted .text { color:#6B7280; font-weight:600; }
 
-/* ── 카테고리 4박스: 숫자 강조 + 통과/보완 + 한줄 코멘트 ── */
+/* ── 카테고리 4박스: 숫자 강조 + 통과/보완 + 한줄 코멘트 (글자 1.5배) ── */
 .pf-cat-grid {
     display:grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap:10px; margin:10px 0 6px 0;
+    gap:12px; margin:12px 0 8px 0;
 }
 .pf-cat-box {
-    border-radius:12px; padding:12px 14px;
+    border-radius:14px; padding:16px 18px;
     background:#FFFFFF; border:1.5px solid #E5E7EB;
-    display:flex; gap:12px; align-items:flex-start;
+    display:flex; gap:16px; align-items:flex-start;
     box-shadow:0 1px 2px rgba(0,0,0,0.04);
 }
 .pf-cat-num {
     flex:0 0 auto;
-    width:38px; height:38px; border-radius:10px;
+    width:56px; height:56px; border-radius:12px;
     display:flex; align-items:center; justify-content:center;
-    font-size:18px; font-weight:800; color:#FFFFFF;
+    font-size:28px; font-weight:800; color:#FFFFFF;
 }
 .pf-cat-body { flex:1 1 auto; min-width:0; }
-.pf-cat-name { font-size:14px; font-weight:700; color:#1F2937; }
+.pf-cat-name { font-size:21px; font-weight:800; color:#1F2937; }
 .pf-cat-row {
-    display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap;
+    display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap:wrap;
 }
 .pf-cat-status {
-    display:inline-block; padding:3px 10px; border-radius:999px;
-    font-size:12px; font-weight:800;
+    display:inline-block; padding:5px 14px; border-radius:999px;
+    font-size:18px; font-weight:800;
 }
 .pf-cat-pass { background:#ECFDF5; color:#065F46; }
 .pf-cat-warn { background:#FFFBEB; color:#92400E; }
 .pf-cat-none { background:#F3F4F6; color:#6B7280; }
 .pf-cat-desc {
-    font-size:13px; color:#374151; font-weight:500;
-    line-height:1.45; flex:1 1 0; min-width:0;
+    font-size:19px; color:#374151; font-weight:500;
+    line-height:1.55; flex:1 1 0; min-width:0;
 }
-.pf-cat-lines { margin-top:6px; }
+.pf-cat-lines { margin-top:8px; }
 .pf-cat-line {
-    font-size:13px; color:#1F2937; line-height:1.55;
-    margin-top:4px; word-break:keep-all;
+    font-size:19px; color:#1F2937; line-height:1.6;
+    margin-top:6px; word-break:keep-all;
 }
 .pf-cat-line b {
-    display:inline-block; min-width:62px; text-align:center;
-    color:#1E3A8A; font-weight:800; font-size:11px;
-    margin-right:8px; padding:2px 8px; border-radius:6px;
+    display:inline-block; min-width:94px; text-align:center;
+    color:#1E3A8A; font-weight:800; font-size:16px;
+    margin-right:10px; padding:3px 12px; border-radius:8px;
     background:#EFF6FF; letter-spacing:0.3px; vertical-align:middle;
 }
 .pf-cat-line.fact b { background:#E0F2FE; color:#075985; }
 .pf-cat-line.ncs  b { background:#EDE9FE; color:#5B21B6; }
 .pf-cat-line.imp  b { background:#FEF3C7; color:#92400E; }
 
-/* 종합 코멘트 박스 */
+/* 종합 코멘트 박스 (글자 1.5배) */
 .pf-overall {
-    background:#F9FAFB; border:1px solid #E5E7EB; border-radius:12px;
-    padding:14px 18px; margin:12px 0;
-    color:#1F2937; font-size:14px; line-height:1.7; white-space:pre-wrap;
+    background:#F9FAFB; border:1px solid #E5E7EB; border-radius:14px;
+    padding:18px 22px; margin:14px 0;
+    color:#1F2937; font-size:21px; line-height:1.7; white-space:pre-wrap;
 }
 .pf-overall .head {
-    font-size:12px; font-weight:800; color:#6B7280;
-    letter-spacing:0.3px; margin-bottom:6px;
+    font-size:17px; font-weight:800; color:#6B7280;
+    letter-spacing:0.3px; margin-bottom:8px;
 }
 
 /* 카테고리 박스 좌측 강조선 색 — 통과는 초록, 보완은 주황, 미평가는 회색 */
