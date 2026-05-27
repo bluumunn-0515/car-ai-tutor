@@ -1936,15 +1936,32 @@ _PORTFOLIO_CSS = """
 .pf-cat-line.ncs  b { background:#EDE9FE; color:#5B21B6; }
 .pf-cat-line.imp  b { background:#FEF3C7; color:#92400E; }
 
-/* 종합 코멘트 박스 (글자 1.5배) */
+/* ── 종합 코멘트 박스 — 카테고리(흰 박스)와 명확히 구분되는 어두운 톤 ── */
 .pf-overall {
-    background:#F9FAFB; border:1px solid #E5E7EB; border-radius:14px;
-    padding:18px 22px; margin:14px 0;
-    color:#1F2937; font-size:21px; line-height:1.7; white-space:pre-wrap;
+    background: linear-gradient(135deg,#0F172A 0%,#1E293B 50%,#334155 100%);
+    border-radius:16px;
+    border-left:8px solid #F59E0B;
+    padding:14px 22px 16px 22px;
+    margin:22px 0 10px 0;
+    color:#F8FAFC;
+    box-shadow:0 10px 24px rgba(15,23,42,0.32);
+    font-size:23px;
+    line-height:1.55;
+    white-space:pre-wrap;
+    word-break:keep-all;
 }
 .pf-overall .head {
-    font-size:17px; font-weight:800; color:#6B7280;
-    letter-spacing:0.3px; margin-bottom:8px;
+    display:inline-block;
+    background:linear-gradient(135deg,#F59E0B 0%,#FBBF24 100%);
+    color:#1F2937;
+    font-size:16px;
+    font-weight:900;
+    padding:4px 14px;
+    border-radius:999px;
+    letter-spacing:0.6px;
+    margin-bottom:8px;
+    box-shadow:0 2px 6px rgba(245,158,11,0.35);
+    white-space:nowrap;
 }
 
 /* 카테고리 박스 좌측 강조선 색 — 통과는 초록, 보완은 주황, 미평가는 회색 */
