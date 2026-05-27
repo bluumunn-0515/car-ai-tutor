@@ -2517,18 +2517,33 @@ def _get_teacher_password() -> str:
 def render_teacher_login() -> None:
     st.markdown("### 🧑‍🏫 교사 로그인")
     with st.form("teacher_login_form"):
-        pw = st.text_input("교사 비밀번호", type="password",
-                           help="기본값은 0000이며, secrets의 TEACHER_PASSWORD로 변경 가능합니다.")
+        name = st.text_input(
+            "이름",
+            key="teacher_login_name",
+            placeholder="예: 홍길동",
+            help="대시보드 상단에 표시될 선생님 성함을 입력해 주세요.",
+        )
+        pw = st.text_input(
+            "교사 비밀번호", type="password",
+            key="teacher_login_pw",
+            help="기본값은 0000이며, secrets의 TEACHER_PASSWORD로 변경 가능합니다.",
+        )
         ok = st.form_submit_button("로그인", type="primary")
     if ok:
+        if not (name or "").strip():
+            st.error("이름을 입력해 주세요.")
+            return
         if pw == _get_teacher_password():
             st.session_state["teacher_logged_in"] = True
+            st.session_state["teacher_display_name"] = name.strip()
             st.rerun()
         else:
             st.error("비밀번호가 올바르지 않습니다.")
 
 def render_teacher_mode() -> None:
-    st.header("🧑‍🏫 교사 대시보드")
+    teacher_name = (st.session_state.get("teacher_display_name") or "").strip()
+    header_suffix = f" — {teacher_name} 선생님" if teacher_name else ""
+    st.header(f"🧑‍🏫 교사 대시보드{header_suffix}")
     st.caption("학생들의 실습 기록을 확인하고 피드백을 남길 수 있습니다.")
 
     try:
@@ -2854,6 +2869,7 @@ with st.sidebar:
     if st.button("🔄 역할 다시 선택", use_container_width=True):
         st.session_state["app_role"] = None
         st.session_state["teacher_logged_in"] = False
+        st.session_state["teacher_display_name"] = ""
         reset_student_session_soft()
         st.rerun()
     st.markdown("---")
