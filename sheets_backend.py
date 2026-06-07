@@ -22,6 +22,7 @@ except ImportError:
 
 SHEET_USERS = "users"
 SHEET_HISTORY = "history"
+SHEET_FINAL = "final_assessments"
 
 USERS_COLS = ["student_id", "name", "password_hash"]
 HISTORY_COLS = [
@@ -42,6 +43,15 @@ HISTORY_COLS = [
     "image_b64",
     "mission_step_photos_json",
     "ai_chance_used_steps",
+]
+FINAL_COLS = [
+    "student_id",
+    "student_name",
+    "final_score",
+    "teacher_overall_comment",
+    "subject_specialty_notes",
+    "updated_at",
+    "updated_by",
 ]
 
 _CACHE_TTL_SEC = 60.0
@@ -377,6 +387,104 @@ def clear_history_worksheet() -> None:
     conn.update(worksheet=SHEET_HISTORY, data=empty_df)
     st.session_state.pop("_gs_history_df", None)
     st.session_state.pop("_gs_history_ts", None)
+
+
+# ---------------------------------------------------------------------------
+# 학기말 최종 평가 (final_assessments 시트) — 학생별 1행
+# ---------------------------------------------------------------------------
+def read_final_df() -> pd.DataFrame:
+    now = time.time()
+    if (
+        st.session_state.get("_gs_final_df") is not None
+        and now - st.session_state.get("_gs_final_ts", 0) < _CACHE_TTL_SEC
+    ):
+        return st.session_state._gs_final_df
+    try:
+        conn = get_gsheets_connection()
+        df = conn.read(worksheet=SHEET_FINAL, ttl=0)
+    except Exception as e:
+        # 시트가 아직 없거나 권한·네트워크 문제일 때 — 빈 테이블로 폴백.
+        logger.info("final_assessments 시트 읽기 실패(빈 테이블로 폴백): %s", e)
+        df = pd.DataFrame(columns=FINAL_COLS)
+    df = _normalize_df(df, FINAL_COLS)
+    df["student_id"] = df["student_id"].map(_normalize_sheet_student_id)
+    st.session_state._gs_final_df = df
+    st.session_state._gs_final_ts = now
+    return df
+
+
+def get_final_assessment(student_id: Any) -> Optional[dict[str, Any]]:
+    """해당 학생의 최종 평가 row를 반환. 없으면 None."""
+    sid = _normalize_sheet_student_id(student_id)
+    if not sid:
+        return None
+    df = read_final_df()
+    if df.empty:
+        return None
+    m = df[df["student_id"] == sid]
+    if m.empty:
+        return None
+    row = m.iloc[0]
+    return {k: str(row.get(k, "")).strip() for k in FINAL_COLS}
+
+
+def upsert_final_assessment(
+    student_id: str,
+    student_name: str,
+    final_score: str,
+    teacher_overall_comment: str,
+    subject_specialty_notes: str,
+    updated_at: str,
+    updated_by: str,
+) -> None:
+    """학생 1명의 최종 평가 row를 삽입 또는 업데이트(upsert)."""
+    conn = _ensure_private_mode_for_write()
+    try:
+        df = conn.read(worksheet=SHEET_FINAL, ttl=0)
+    except Exception:
+        df = pd.DataFrame(columns=FINAL_COLS)
+    df = _normalize_df(df, FINAL_COLS)
+    df["student_id"] = df["student_id"].map(_normalize_sheet_student_id)
+
+    sid = _normalize_sheet_student_id(student_id)
+    new_row = {
+        "student_id": sid,
+        "student_name": student_name,
+        "final_score": final_score,
+        "teacher_overall_comment": teacher_overall_comment,
+        "subject_specialty_notes": subject_specialty_notes,
+        "updated_at": updated_at,
+        "updated_by": updated_by,
+    }
+    # 셀 한도 안전망
+    new_row = {k: _clip_value_for_sheet_cell(k, v) for k, v in new_row.items()}
+
+    mask = df["student_id"] == sid
+    if mask.any():
+        for k, v in new_row.items():
+            df.loc[mask, k] = v
+    else:
+        df = pd.concat(
+            [df.astype(str), pd.DataFrame([new_row], columns=FINAL_COLS)],
+            ignore_index=True,
+        )
+
+    try:
+        conn.update(worksheet=SHEET_FINAL, data=df)
+    except Exception as e_update:
+        # 시트 탭이 아직 없는 경우 — 자동 생성 시도
+        logger.info("final_assessments update 실패, create 시도: %s", e_update)
+        try:
+            conn.create(worksheet=SHEET_FINAL, data=df)
+        except Exception as e_create:
+            raise RuntimeError(
+                "final_assessments 시트를 갱신하지 못했습니다. "
+                "구글 시트 권한·이름·연결 설정을 확인해 주세요. "
+                f"(update 오류: {e_update} / create 오류: {e_create})"
+            ) from e_create
+
+    st.session_state.pop("_gs_final_df", None)
+    st.session_state.pop("_gs_final_ts", None)
 
 
 def maybe_upgrade_plaintext_password(student_id: str, plain_password: str, stored_hash: str) -> None:

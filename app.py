@@ -538,6 +538,96 @@ def ask_gemini_step_help(
         + "\n".join(f"• {m}" for m in error_log)
     )
 
+def build_subject_specialty_prompt(student_name: str, records: list[dict]) -> str:
+    """학기말 누적 기록을 분석해 '과목별세부특기사항' 초안을 생성하는 프롬프트.
+    학교생활기록부에 그대로 옮겨 적을 수 있는 공적·서술형 어조의 200~400자 문장을 요구한다."""
+    rec_lines: list[str] = []
+    for r in records:
+        unit = (r.get("unit") or "").strip()
+        score = _safe_float(r.get("ncs_score"))
+        when = (r.get("submitted_at") or "")[:10]
+        eval_only = _extract_evaluation_only(r.get("result", ""))
+        det = _parse_evaluation_details(eval_only)
+        summary = (det.get("summary") or "").strip()
+        cats = det.get("categories") or []
+        cats_status = ", ".join(
+            f"{c.get('name')}={c.get('status')}" for c in cats
+        ) or "(미평가)"
+        rec_lines.append(
+            f"- [{when}] 단원: {unit} | 점수 {score:.0f} | 한줄요약: {summary or '(없음)'}\n"
+            f"  카테고리 상태: {cats_status}"
+        )
+    summary_text = "\n".join(rec_lines) or "(누적 기록 없음)"
+
+    return f"""
+너는 학생의 학교생활기록부 '과목별세부특기사항' 작성을 보조하는 평가 코치다.
+교사가 그대로 옮겨 적을 수 있는 공적·서술형 초안을 작성한다.
+
+[학생 이름] {student_name}
+[과목] 자동차 전기전자제어 (NCS 수행준거 기반)
+
+[학기 전체 실습 기록 요약]
+{summary_text}
+
+[필수 규칙]
+1. 200~400자, 1~2문단의 한 덩어리 서술형 문장으로 작성.
+2. 학교생활기록부에 어울리는 공적·관찰형 어조. 머리말·맺음말·이모지·꾸밈문자 금지.
+3. 학생 실명을 직접 호명하지 말고 "본 학생", "이 학생"으로만 지칭.
+4. 다음 네 가지를 자연스럽게 녹여라:
+   - 어떤 NCS 능력단위에 대한 실습을 어떤 양상으로 수행했는지 (구체 단원명 포함)
+   - 학습 태도·과정에서 관찰된 강점
+   - 측정·진단 절차 수행에서 보여준 성장 또는 변화
+   - 보완이 필요한 부분과 앞으로의 학습 방향
+5. 단정적 평가어("최고", "최우수") 대신 관찰형 어구("~을 정확히 수행함",
+   "~ 절차를 능숙히 적용함", "~에서 성장하는 모습을 보임")를 사용.
+6. 정답·고장 원인을 단정하는 표현 금지.
+
+[출력 형식]
+(서술형 본문만 출력. 머리말·라벨·따옴표 없음.)
+""".strip()
+
+
+def ask_gemini_for_specialty_notes(
+    student_name: str, records: list[dict], key: str,
+) -> str:
+    """과목별세부특기사항 초안을 Gemini로 생성. 실패 사유는 사람이 읽을 수 있게 반환."""
+    if genai is None or types is None:
+        return "❌ google-genai 패키지를 불러오지 못했습니다."
+    if not (key and str(key).strip()):
+        return "❌ Gemini API 키가 설정되어 있지 않습니다."
+    try:
+        client = genai.Client(api_key=str(key).strip())
+    except Exception as e:
+        return f"❌ Gemini 클라이언트 초기화 실패: {type(e).__name__}: {e}"
+
+    prompt = build_subject_specialty_prompt(student_name, records)
+    parts = [types.Part.from_text(text=prompt)]
+    error_log: list[str] = []
+    for model_name in GEMINI_MODEL_CANDIDATES:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[types.Content(role="user", parts=parts)],
+            )
+            text = (getattr(response, "text", None) or "").strip()
+            if text:
+                logger.info("과목별세부특기사항 생성 성공: model=%s, chars=%d",
+                            model_name, len(text))
+                return text
+            error_log.append(f"{model_name}: 응답이 비어있음")
+        except Exception as e:
+            msg = f"{model_name}: {type(e).__name__}: {e}"
+            error_log.append(msg)
+            logger.error("과목별세부특기사항 생성 에러 — %s", msg)
+            continue
+    return (
+        "❌ AI 응답 실패\n\n"
+        "사용 가능한 Gemini 모델을 찾지 못했습니다. 잠시 후 다시 시도해 주세요.\n\n"
+        "[시도한 모델별 오류]\n"
+        + "\n".join(f"• {m}" for m in error_log)
+    )
+
+
 def _detect_image_mime(image_file: Any) -> str:
     """Streamlit file_uploader의 UploadedFile에서 mime 타입을 안전하게 추출."""
     mime = (getattr(image_file, "type", None) or "").strip().lower()
@@ -2743,6 +2833,191 @@ def _render_teacher_record_detail(rec: dict, student_name: str) -> None:
             st.caption(f"최근 저장: {updated_at}")
 
 
+def _render_teacher_final_assessment(
+    student_id: str,
+    student_name: str,
+    records: list[dict],
+    api_key: str,
+) -> None:
+    """교사가 학생의 학기말 최종 포트폴리오를 확인하고
+    (1) 최종 수행평가 점수, (2) 최종 총평, (3) AI 과목별세부특기사항 초안을 작성·저장한다.
+    저장은 시트의 final_assessments (학생별 1행)에 upsert 된다."""
+    completed_units = {(r.get("unit") or "").strip() for r in records if r.get("unit")}
+    required_units = list(NCS_UNITS)
+    done_units = [u for u in required_units if u in completed_units]
+    missing_units = [u for u in required_units if u not in completed_units]
+    portfolio_ready = len(missing_units) == 0
+
+    avg_score = (
+        sum(_safe_float(r.get("ncs_score")) for r in records) / len(records)
+        if records else 0.0
+    )
+    fb_count = sum(1 for r in records if (r.get("teacher_feedback") or "").strip())
+
+    # ── 상단 요약 ─────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("단원 완료", f"{len(done_units)} / {len(required_units)}")
+    c2.metric("총 실습", f"{len(records)} 건")
+    c3.metric("평균 성취도", f"{avg_score:.1f} 점")
+    c4.metric("내가 남긴 피드백", f"{fb_count} 건")
+
+    if portfolio_ready:
+        st.success("학생이 6개 단원의 수행평가를 모두 완료했습니다. 최종 포트폴리오 확인이 가능합니다.")
+    else:
+        miss_str = ", ".join(missing_units)
+        st.warning(
+            f"아직 {len(missing_units)}개 단원의 수행평가가 남아 있어요: {miss_str}\n"
+            "최종 포트폴리오 PDF는 6개 단원이 모두 완료된 뒤에 생성할 수 있어요. "
+            "단, 최종 점수·총평·과목별세부특기사항 초안은 지금도 작성·저장할 수 있습니다."
+        )
+
+    # ── 최종 포트폴리오 PDF 미리보기/다운로드 ─────
+    pdf_session_key = f"_teacher_pdf_{student_id}"
+    if portfolio_ready:
+        bcol1, bcol2 = st.columns([1, 1])
+        with bcol1:
+            if st.button("📄 최종 포트폴리오 PDF 생성하기",
+                         key=f"build_pdf_{student_id}", use_container_width=True):
+                with st.spinner("PDF를 생성하고 있어요..."):
+                    pdf_bytes = build_comprehensive_portfolio_pdf(
+                        student_id, student_name, records
+                    )
+                if pdf_bytes:
+                    st.session_state[pdf_session_key] = pdf_bytes
+                    st.success("PDF가 생성되었습니다. 오른쪽 버튼으로 다운로드하세요.")
+                else:
+                    st.info("PDF 생성에 실패했어요. 잠시 후 다시 시도하거나 학생 기록을 확인해 주세요.")
+        with bcol2:
+            cached_pdf = st.session_state.get(pdf_session_key)
+            if cached_pdf:
+                st.download_button(
+                    "📥 PDF 다운로드", data=cached_pdf,
+                    file_name=f"Final_Portfolio_{student_id}.pdf",
+                    mime="application/pdf",
+                    key=f"dl_pdf_{student_id}",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("왼쪽 버튼으로 먼저 PDF를 생성하세요.")
+
+    st.markdown("---")
+
+    # ── 기존 저장본 로드 ──────────────────────────
+    try:
+        existing = shb.get_final_assessment(student_id) or {}
+    except Exception as e:
+        logger.warning("최종 평가 로드 실패(빈 값으로 폴백): %s", e)
+        existing = {}
+
+    # ── 교사 최종 점수 + 총평 ─────────────────────
+    st.markdown("### 🎯 교사 최종 수행평가")
+    try:
+        init_score = float(existing.get("final_score") or 0.0)
+    except (ValueError, TypeError):
+        init_score = 0.0
+    score_col, info_col = st.columns([1, 2])
+    with score_col:
+        final_score = st.number_input(
+            "최종 수행평가 점수 (0~100)",
+            min_value=0.0, max_value=100.0,
+            value=init_score, step=0.5,
+            key=f"final_score_{student_id}",
+            help="학기말 최종 포트폴리오를 바탕으로 교사가 부여하는 점수입니다.",
+        )
+    with info_col:
+        prev_updated = existing.get("updated_at") or ""
+        prev_by = existing.get("updated_by") or ""
+        if prev_updated:
+            st.caption(f"마지막 저장: {prev_updated} · {prev_by or '(교사)'}")
+        else:
+            st.caption("아직 저장된 최종 평가가 없습니다.")
+
+    final_comment = st.text_area(
+        "최종 총평 (교사 작성)",
+        value=existing.get("teacher_overall_comment") or "",
+        key=f"final_comment_{student_id}",
+        height=130,
+        placeholder="학기말 최종 포트폴리오를 바탕으로 한 종합 코멘트를 작성하세요.",
+    )
+
+    st.markdown("")
+
+    # ── AI 과목별세부특기사항 초안 ────────────────
+    st.markdown("### 🧾 AI 과목별세부특기사항 초안")
+    st.caption(
+        "학기 전체 실습 기록을 AI가 분석해 학교생활기록부 '과목별세부특기사항'에 "
+        "옮겨 적을 수 있는 서술형 초안을 생성합니다. 생성 후 자유롭게 수정해 저장하세요."
+    )
+    specialty_session_key = f"_specialty_text_{student_id}"
+    if specialty_session_key not in st.session_state:
+        st.session_state[specialty_session_key] = (
+            existing.get("subject_specialty_notes") or ""
+        )
+
+    gcol1, gcol2 = st.columns([1, 2])
+    with gcol1:
+        if st.button("🤖 AI 초안 생성/재생성",
+                     key=f"gen_specialty_{student_id}",
+                     use_container_width=True):
+            if not records:
+                st.error("누적된 실습 기록이 없어 분석할 수 없습니다.")
+            elif not api_key:
+                st.error("Gemini API 키가 설정되어 있지 않습니다.")
+            else:
+                with st.spinner("AI가 학기 전체 기록을 분석해 초안을 작성 중..."):
+                    draft = ask_gemini_for_specialty_notes(
+                        student_name, records, api_key
+                    )
+                if (not draft) or draft.lstrip().startswith("❌"):
+                    st.error(draft or "AI 응답을 받지 못했습니다.")
+                else:
+                    st.session_state[specialty_session_key] = draft
+                    st.rerun()
+    with gcol2:
+        st.caption(
+            "버튼을 누르면 누적된 모든 수행평가 기록(단원·점수·한줄 요약·카테고리 상태)을 "
+            "AI가 종합해 초안을 만들어 아래 칸에 채워줍니다."
+        )
+
+    specialty_text = st.text_area(
+        "과목별세부특기사항 (수정 가능)",
+        value=st.session_state.get(specialty_session_key, ""),
+        key=f"final_specialty_{student_id}",
+        height=200,
+        placeholder="AI 초안을 만든 뒤 필요한 부분을 직접 다듬어 저장하세요.",
+    )
+
+    st.markdown("---")
+
+    # ── 저장 버튼 ─────────────────────────────────
+    save_col, _ = st.columns([1, 3])
+    with save_col:
+        if st.button("💾 최종 평가 저장",
+                     type="primary",
+                     key=f"save_final_{student_id}",
+                     use_container_width=True):
+            updated_by = (
+                (st.session_state.get("teacher_display_name") or "").strip()
+                or "(교사)"
+            )
+            try:
+                shb.upsert_final_assessment(
+                    student_id=student_id,
+                    student_name=student_name,
+                    final_score=f"{float(final_score):.1f}",
+                    teacher_overall_comment=final_comment.strip(),
+                    subject_specialty_notes=specialty_text.strip(),
+                    updated_at=now_kst_display(),
+                    updated_by=updated_by,
+                )
+                st.session_state[specialty_session_key] = specialty_text.strip()
+                st.success("최종 평가가 저장되었습니다.")
+                st.rerun()
+            except Exception as e:
+                logger.exception("최종 평가 저장 실패: %s", e)
+                st.error(f"저장 실패: {e}")
+
+
 def render_teacher_mode() -> None:
     teacher_name = (st.session_state.get("teacher_display_name") or "").strip()
     header_suffix = f" — {teacher_name} 선생님" if teacher_name else ""
@@ -2817,6 +3092,14 @@ def render_teacher_mode() -> None:
         )
         with st.expander(title, expanded=False):
             _render_teacher_record_detail(rec, student_name)
+
+    # ── 학기말 최종 포트폴리오 + 교사 최종 평가 + AI 과목별세부특기사항 ──
+    st.markdown("---")
+    st.markdown(f"## 🎓 {student_name} 학생의 학기말 최종 포트폴리오")
+    api_key_teacher = st.secrets.get("GEMINI_API_KEY", "")
+    _render_teacher_final_assessment(
+        sel_sid, student_name, student_records, api_key_teacher
+    )
 
 # ───────────────────────────────────────────────────────────────────────────
 # 랜딩(역할 선택) 페이지
