@@ -587,6 +587,26 @@ def build_subject_specialty_prompt(student_name: str, records: list[dict]) -> st
 """.strip()
 
 
+def _extract_gemini_text(response: Any) -> str:
+    """Gemini generate_content 응답에서 텍스트를 안전하게 추출."""
+    text = (getattr(response, "text", None) or "").strip()
+    if text:
+        return text
+    try:
+        chunks: list[str] = []
+        for cand in getattr(response, "candidates", None) or []:
+            content = getattr(cand, "content", None)
+            if not content:
+                continue
+            for part in getattr(content, "parts", None) or []:
+                part_text = getattr(part, "text", None)
+                if part_text:
+                    chunks.append(str(part_text))
+        return "\n".join(chunks).strip()
+    except Exception:
+        return ""
+
+
 def ask_gemini_for_specialty_notes(
     student_name: str, records: list[dict], key: str,
 ) -> str:
@@ -609,7 +629,7 @@ def ask_gemini_for_specialty_notes(
                 model=model_name,
                 contents=[types.Content(role="user", parts=parts)],
             )
-            text = (getattr(response, "text", None) or "").strip()
+            text = _extract_gemini_text(response)
             if text:
                 logger.info("과목별세부특기사항 생성 성공: model=%s, chars=%d",
                             model_name, len(text))
@@ -2294,6 +2314,19 @@ def _parse_ai_chance_steps(rec: dict) -> list[int]:
             continue
     return sorted(set(out))
 
+
+def _latest_record_per_unit(records: list[dict]) -> list[dict]:
+    """단원별 가장 최근 수행평가 1건씩 반환 (NCS_UNITS 순)."""
+    by_unit: dict[str, dict] = {}
+    for rec in records:
+        unit = (rec.get("unit") or "").strip()
+        if not unit:
+            continue
+        prev = by_unit.get(unit)
+        if prev is None or (rec.get("submitted_at") or "") >= (prev.get("submitted_at") or ""):
+            by_unit[unit] = rec
+    return [by_unit[u] for u in NCS_UNITS if u in by_unit]
+
 def _esc_html(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -2867,8 +2900,8 @@ def _render_teacher_final_assessment(
         miss_str = ", ".join(missing_units)
         st.warning(
             f"아직 {len(missing_units)}개 단원의 수행평가가 남아 있어요: {miss_str}\n"
-            "최종 포트폴리오 PDF는 6개 단원이 모두 완료된 뒤에 생성할 수 있어요. "
-            "단, 최종 점수·총평·과목별세부특기사항 초안은 지금도 작성·저장할 수 있습니다."
+            "최종 포트폴리오 PDF와 AI 세특 초안은 6개 단원이 모두 완료된 뒤에 생성할 수 있어요. "
+            "최종 점수·총평은 지금도 작성·저장할 수 있습니다."
         )
 
     # ── 최종 포트폴리오 PDF 미리보기/다운로드 ─────
@@ -2944,45 +2977,66 @@ def _render_teacher_final_assessment(
 
     # ── AI 과목별세부특기사항 초안 ────────────────
     st.markdown("### 🧾 AI 과목별세부특기사항 초안")
-    st.caption(
-        "학기 전체 실습 기록을 AI가 분석해 학교생활기록부 '과목별세부특기사항'에 "
-        "옮겨 적을 수 있는 서술형 초안을 생성합니다. 생성 후 자유롭게 수정해 저장하세요."
-    )
-    specialty_session_key = f"_specialty_text_{student_id}"
-    if specialty_session_key not in st.session_state:
-        st.session_state[specialty_session_key] = (
+    portfolio_records = _latest_record_per_unit(records)
+    specialty_widget_key = f"final_specialty_{student_id}"
+    if specialty_widget_key not in st.session_state:
+        st.session_state[specialty_widget_key] = (
             existing.get("subject_specialty_notes") or ""
+        )
+
+    if portfolio_ready:
+        st.caption(
+            "6개 단원 수행평가가 모두 완료된 학생의 최종 포트폴리오 기록을 AI가 분석해 "
+            "학교생활기록부 '과목별세부특기사항'에 옮겨 적을 수 있는 서술형 초안을 생성합니다. "
+            "생성 후 자유롭게 수정해 저장하세요."
+        )
+    else:
+        st.caption(
+            "세특 초안은 6개 단원 수행평가를 모두 완료한 학생(최종 포트폴리오 생성 가능 학생)에 대해서만 "
+            "생성할 수 있습니다."
         )
 
     gcol1, gcol2 = st.columns([1, 2])
     with gcol1:
-        if st.button("🤖 AI 초안 생성/재생성",
-                     key=f"gen_specialty_{student_id}",
-                     use_container_width=True):
-            if not records:
-                st.error("누적된 실습 기록이 없어 분석할 수 없습니다.")
+        if st.button(
+            "🤖 AI 초안 생성/재생성",
+            key=f"gen_specialty_{student_id}",
+            use_container_width=True,
+            disabled=not portfolio_ready,
+        ):
+            if not portfolio_ready:
+                st.error("6개 단원 수행평가를 모두 완료한 학생만 세특 초안을 생성할 수 있습니다.")
             elif not api_key:
                 st.error("Gemini API 키가 설정되어 있지 않습니다.")
             else:
-                with st.spinner("AI가 학기 전체 기록을 분석해 초안을 작성 중..."):
+                with st.spinner("AI가 최종 포트폴리오 기록을 분석해 초안을 작성 중..."):
                     draft = ask_gemini_for_specialty_notes(
-                        student_name, records, api_key
+                        student_name, portfolio_records, api_key
                     )
                 if (not draft) or draft.lstrip().startswith("❌"):
                     st.error(draft or "AI 응답을 받지 못했습니다.")
                 else:
-                    st.session_state[specialty_session_key] = draft
+                    st.session_state[specialty_widget_key] = draft
+                    st.session_state[f"_specialty_success_{student_id}"] = True
                     st.rerun()
     with gcol2:
-        st.caption(
-            "버튼을 누르면 누적된 모든 수행평가 기록(단원·점수·한줄 요약·카테고리 상태)을 "
-            "AI가 종합해 초안을 만들어 아래 칸에 채워줍니다."
-        )
+        if portfolio_ready:
+            st.caption(
+                "버튼을 누르면 6개 단원 각각의 최신 수행평가 기록(점수·한줄 요약·카테고리 상태)을 "
+                "AI가 종합해 아래 칸에 초안을 채워줍니다."
+            )
+        else:
+            st.caption(
+                f"현재 {len(portfolio_records)} / {len(NCS_UNITS)} 단원 완료. "
+                "남은 단원의 수행평가가 완료되면 생성 버튼이 활성화됩니다."
+            )
+
+    if st.session_state.pop(f"_specialty_success_{student_id}", False):
+        st.success("과목별세부특기사항 초안이 생성되었습니다. 내용을 확인·수정한 뒤 저장하세요.")
 
     specialty_text = st.text_area(
         "과목별세부특기사항 (수정 가능)",
-        value=st.session_state.get(specialty_session_key, ""),
-        key=f"final_specialty_{student_id}",
+        key=specialty_widget_key,
         height=200,
         placeholder="AI 초안을 만든 뒤 필요한 부분을 직접 다듬어 저장하세요.",
     )
@@ -3010,7 +3064,7 @@ def _render_teacher_final_assessment(
                     updated_at=now_kst_display(),
                     updated_by=updated_by,
                 )
-                st.session_state[specialty_session_key] = specialty_text.strip()
+                st.session_state[specialty_widget_key] = specialty_text.strip()
                 st.success("최종 평가가 저장되었습니다.")
                 st.rerun()
             except Exception as e:
