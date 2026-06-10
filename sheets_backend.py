@@ -341,6 +341,14 @@ def invalidate_all_sheet_caches() -> None:
     st.session_state.pop("_gs_users_ts", None)
     st.session_state.pop("_gs_history_df", None)
     st.session_state.pop("_gs_history_ts", None)
+    st.session_state.pop("_gs_final_df", None)
+    st.session_state.pop("_gs_final_ts", None)
+
+
+def force_refresh_final_df() -> pd.DataFrame:
+    st.session_state.pop("_gs_final_df", None)
+    st.session_state.pop("_gs_final_ts", None)
+    return read_final_df()
 
 
 def force_refresh_history() -> pd.DataFrame:
@@ -447,44 +455,52 @@ def upsert_final_assessment(
     df["student_id"] = df["student_id"].map(_normalize_sheet_student_id)
 
     sid = _normalize_sheet_student_id(student_id)
+    if not sid:
+        raise ValueError("학번(student_id)이 비어 있어 최종 평가를 저장할 수 없습니다.")
+
     new_row = {
         "student_id": sid,
-        "student_name": student_name,
-        "final_score": final_score,
-        "teacher_overall_comment": teacher_overall_comment,
-        "subject_specialty_notes": subject_specialty_notes,
-        "updated_at": updated_at,
-        "updated_by": updated_by,
+        "student_name": str(student_name or "").strip(),
+        "final_score": str(final_score or "").strip(),
+        "teacher_overall_comment": str(teacher_overall_comment or "").strip(),
+        "subject_specialty_notes": str(subject_specialty_notes or "").strip(),
+        "updated_at": str(updated_at or "").strip(),
+        "updated_by": str(updated_by or "").strip(),
     }
-    # 셀 한도 안전망
     new_row = {k: _clip_value_for_sheet_cell(k, v) for k, v in new_row.items()}
+
+    if not df.empty:
+        df = df[df["student_id"].astype(str).str.strip() != ""]
+        df = df.drop_duplicates(subset=["student_id"], keep="last")
 
     mask = df["student_id"] == sid
     if mask.any():
+        idx = df.index[mask][-1]
         for k, v in new_row.items():
-            df.loc[mask, k] = v
+            df.at[idx, k] = v
     else:
         df = pd.concat(
-            [df.astype(str), pd.DataFrame([new_row], columns=FINAL_COLS)],
+            [df, pd.DataFrame([new_row], columns=FINAL_COLS)],
             ignore_index=True,
         )
+
+    df = _normalize_df(df, FINAL_COLS)
 
     try:
         conn.update(worksheet=SHEET_FINAL, data=df)
     except Exception as e_update:
-        # 시트 탭이 아직 없는 경우 — 자동 생성 시도
         logger.info("final_assessments update 실패, create 시도: %s", e_update)
         try:
             conn.create(worksheet=SHEET_FINAL, data=df)
         except Exception as e_create:
             raise RuntimeError(
                 "final_assessments 시트를 갱신하지 못했습니다. "
-                "구글 시트 권한·이름·연결 설정을 확인해 주세요. "
-                f"(update 오류: {e_update} / create 오류: {e_create})"
+                "구글 스프레드시트에 'final_assessments' 탭이 있는지, "
+                "서비스 계정에 편집 권한이 있는지 확인해 주세요. "
+                f"(update: {e_update} / create: {e_create})"
             ) from e_create
 
-    st.session_state.pop("_gs_final_df", None)
-    st.session_state.pop("_gs_final_ts", None)
+    force_refresh_final_df()
 
 
 def maybe_upgrade_plaintext_password(student_id: str, plain_password: str, stored_hash: str) -> None:

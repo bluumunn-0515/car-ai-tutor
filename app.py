@@ -2105,6 +2105,25 @@ _PORTFOLIO_CSS = """
 }
 .pf-stat .help-mark:hover { background:rgba(255,255,255,0.55); color:#1E3A8A; }
 
+/* ── 학기말 최종 수행평가 (학생 포트폴리오 최상단) ── */
+.pf-final-assess {
+    background: linear-gradient(135deg,#312E81 0%,#4338CA 55%,#6366F1 100%);
+    color:#fff; border-radius:18px; padding:22px 26px; margin-bottom:18px;
+    box-shadow:0 8px 22px rgba(67,56,202,0.28);
+}
+.pf-final-head { font-size:20px; font-weight:800; margin-bottom:10px; letter-spacing:-0.2px; }
+.pf-final-score {
+    display:inline-block; background:rgba(255,255,255,0.18);
+    border:1px solid rgba(255,255,255,0.35); border-radius:12px;
+    padding:8px 16px; font-size:28px; font-weight:800; margin-bottom:12px;
+}
+.pf-final-comment {
+    background:rgba(255,255,255,0.12); border-radius:12px;
+    padding:14px 16px; line-height:1.75; font-size:18px; font-weight:500;
+    white-space:pre-wrap;
+}
+.pf-final-meta { margin-top:10px; font-size:13px; opacity:0.85; }
+
 /* ── 선생님 피드백 카드 ── */
 .pf-fb-card {
     background:#FFF7E6; border-left:8px solid #FA8C16;
@@ -2753,8 +2772,58 @@ def _render_final_portfolio_section(records: list[dict]) -> None:
             mime="application/pdf", use_container_width=True,
         )
 
+def _render_student_final_assessment_banner() -> None:
+    """교사가 저장한 학기말 최종 점수·총평만 학생 포트폴리오 최상단에 표시한다.
+    과목별세부특기사항(subject_specialty_notes)은 학생에게 노출하지 않는다."""
+    sid = (st.session_state.get("student_id") or "").strip()
+    if not sid:
+        return
+    try:
+        shb.force_refresh_final_df()
+        final_row = shb.get_final_assessment(sid) or {}
+    except Exception as e:
+        logger.warning("학생 최종 평가 로드 실패: %s", e)
+        return
+
+    score_raw = (final_row.get("final_score") or "").strip()
+    comment = (final_row.get("teacher_overall_comment") or "").strip()
+    if not score_raw and not comment:
+        return
+
+    score_block = ""
+    if score_raw:
+        try:
+            score_val = float(score_raw)
+            score_display = f"{score_val:.1f}점 ({_score_band(score_val)})"
+        except (ValueError, TypeError):
+            score_display = score_raw
+        score_block = f'<div class="pf-final-score">{_esc_html(score_display)}</div>'
+
+    updated = (final_row.get("updated_at") or "").strip()[:16]
+    updated_by = (final_row.get("updated_by") or "").strip()
+    meta_parts = [p for p in (updated, updated_by) if p]
+    meta_html = _esc_html(" · ".join(meta_parts)) if meta_parts else ""
+
+    comment_html = (
+        f'<div class="pf-final-comment">{_esc_html(comment)}</div>'
+        if comment else ""
+    )
+    st.markdown(
+        f"""
+<div class="pf-final-assess">
+  <div class="pf-final-head">🎓 학기말 최종 수행평가</div>
+  {score_block}
+  {comment_html}
+  {f'<div class="pf-final-meta">{meta_html}</div>' if meta_html else ''}
+</div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_portfolio_view():
     st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
+
+    _render_student_final_assessment_banner()
 
     records = st.session_state.get("my_history_records", []) or []
 
@@ -3256,12 +3325,14 @@ def _render_teacher_final_assessment(
                     updated_at=now_kst_display(),
                     updated_by=updated_by,
                 )
-                st.session_state[specialty_widget_key] = specialty_text.strip()
-                st.success("최종 평가가 저장되었습니다.")
+                st.session_state[f"_final_save_ok_{student_id}"] = True
                 st.rerun()
             except Exception as e:
                 logger.exception("최종 평가 저장 실패: %s", e)
                 st.error(f"저장 실패: {e}")
+
+    if st.session_state.pop(f"_final_save_ok_{student_id}", False):
+        st.success("최종 평가가 저장되었습니다.")
 
 
 def render_teacher_mode() -> None:
