@@ -1033,6 +1033,277 @@ def _pdf_safe_multicell(pdf, text: str, line_height: float = 7.0, width: float =
         except Exception as e2:
             logger.error("PDF multi_cell 최종 실패: %s", e2)
 
+
+def _portfolio_pdf_filename(student_id: str, student_name: str) -> str:
+    """다운로드 파일명: 학번_이름_최종포트폴리오.pdf"""
+    sid = re.sub(r'[<>:"/\\|?*\s]+', "_", (student_id or "").strip()) or "학번"
+    sname = re.sub(r'[<>:"/\\|?*\s]+', "_", (student_name or "").strip()) or "이름"
+    return f"{sid}_{sname}_최종포트폴리오.pdf"
+
+
+def _compress_pdf_line(text: Any, max_len: int = 120) -> str:
+    s = _sanitize_pdf_text(text).replace("\n", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1].rstrip(" ,.") + "…"
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = (hex_color or "#000000").lstrip("#")
+    if len(h) != 6:
+        return 0, 0, 0
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _compute_portfolio_overview(records: list[dict]) -> dict[str, Any]:
+    dates = sorted(
+        (r.get("submitted_at") or "")[:10]
+        for r in records
+        if (r.get("submitted_at") or "").strip()
+    )
+    unit_records = _latest_record_per_unit(records)
+    avg_all = (
+        sum(_safe_float(r.get("ncs_score")) for r in records) / len(records)
+        if records else 0.0
+    )
+    avg_final = (
+        sum(_safe_float(r.get("ncs_score")) for r in unit_records) / len(unit_records)
+        if unit_records else avg_all
+    )
+    fb_count = sum(1 for r in records if (r.get("teacher_feedback") or "").strip())
+    chance_total = sum(len(_parse_ai_chance_steps(r)) for r in records)
+    redo_total = sum(int(_safe_float(r.get("redo_count"), 0)) for r in records)
+    return {
+        "period_start": dates[0] if dates else "-",
+        "period_end": dates[-1] if dates else "-",
+        "session_count": len(records),
+        "unit_count": len({(r.get("unit") or "").strip() for r in records if r.get("unit")}),
+        "completed_units": len(unit_records),
+        "avg_score": avg_final,
+        "feedback_count": fb_count,
+        "ai_chance_count": chance_total,
+        "redo_count": redo_total,
+    }
+
+
+def _pick_representative_photos(rec: dict, max_count: int = 2) -> list[bytes]:
+    """단원 기록에서 대표 사진 최대 2장(메인 + 단계 사진 우선)."""
+    photos: list[bytes] = []
+    main = thumbnail_b64_to_bytes(rec.get("image_b64", ""))
+    if main:
+        photos.append(main)
+    for _step, b64 in _parse_step_photos_json(rec.get("mission_step_photos_json", "")):
+        if len(photos) >= max_count:
+            break
+        img = thumbnail_b64_to_bytes(b64)
+        if img:
+            photos.append(img)
+    return photos[:max_count]
+
+
+def _build_unit_summary_lines(rec: dict) -> list[str]:
+    """단원 카드에 넣을 압축 요약 문장."""
+    lines: list[str] = []
+    eval_only = _extract_evaluation_only(rec.get("result", ""))
+    det = _parse_evaluation_details(eval_only)
+
+    summary = (det.get("summary") or "").strip()
+    if summary:
+        lines.append(f"평가 요약: {_compress_pdf_line(summary, 110)}")
+
+    cats = det.get("categories") or []
+    if cats:
+        cat_txt = " · ".join(
+            f"{c.get('name', '')}:{c.get('status', '')}" for c in cats if c.get("name")
+        )
+        if cat_txt:
+            lines.append(f"NCS 영역: {_compress_pdf_line(cat_txt, 95)}")
+
+    symptom = (rec.get("symptom") or "").strip()
+    if symptom:
+        lines.append(f"수행 주제: {_compress_pdf_line(symptom, 95)}")
+
+    reflection = (rec.get("reflection") or "").strip()
+    if reflection:
+        lines.append(f"학습 소감: {_compress_pdf_line(reflection, 95)}")
+
+    feedback = (rec.get("teacher_feedback") or "").strip()
+    if feedback:
+        lines.append(f"교사 피드백: {_compress_pdf_line(feedback, 100)}")
+
+    chance_steps = _parse_ai_chance_steps(rec)
+    if chance_steps:
+        lines.append(f"AI 찬스: {', '.join(str(s) for s in chance_steps)}단계 사용")
+
+    if not lines:
+        lines.append("해당 단원의 수행평가 기록이 저장되어 있습니다.")
+    return lines[:5]
+
+
+def _pdf_set_font(pdf, base_font: str, has_bold: bool, size: float, bold: bool = False) -> None:
+    pdf.set_font(base_font, "B" if (bold and has_bold) else "", size)
+
+
+def _pdf_section_title(
+    pdf, base_font: str, has_bold: bool, title: str,
+    rgb: tuple[int, int, int] = (30, 58, 138),
+) -> None:
+    _pdf_set_font(pdf, base_font, has_bold, 14, bold=True)
+    pdf.set_text_color(*rgb)
+    pdf.set_x(pdf.l_margin)
+    pdf.cell(0, 9, _sanitize_pdf_text(title), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(1)
+
+
+def _pdf_draw_overview_dashboard(
+    pdf, base_font: str, has_bold: bool, overview: dict[str, Any],
+) -> None:
+    """상단 수행평가 전반 요약(기간·횟수·점수·피드백 등)을 한눈에 보이게 배치."""
+    x0 = pdf.l_margin
+    board_w = pdf.w - pdf.l_margin - pdf.r_margin
+    y0 = pdf.get_y()
+
+    # 실습 기간 — 가로 전체
+    pdf.set_xy(x0, y0)
+    pdf.set_fill_color(239, 246, 255)
+    pdf.set_draw_color(191, 219, 254)
+    pdf.rect(x0, y0, board_w, 16, "DF")
+    pdf.set_xy(x0 + 4, y0 + 3)
+    _pdf_set_font(pdf, base_font, has_bold, 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(18, 5, _sanitize_pdf_text("실습 기간"))
+    _pdf_set_font(pdf, base_font, has_bold, 10, bold=True)
+    pdf.set_text_color(30, 58, 138)
+    period = f"{overview['period_start']}  ~  {overview['period_end']}"
+    pdf.cell(board_w - 26, 5, _sanitize_pdf_text(period))
+    pdf.set_text_color(0, 0, 0)
+
+    stats = [
+        ("총 수행 횟수", f"{overview['session_count']}회"),
+        ("완료 단원", f"{overview['completed_units']} / {len(NCS_UNITS)}"),
+        ("평균 성취도", f"{overview['avg_score']:.1f}점"),
+        ("교사 피드백", f"{overview['feedback_count']}건"),
+        ("AI 찬스 사용", f"{overview['ai_chance_count']}회"),
+        ("재수행", f"{overview['redo_count']}회"),
+    ]
+    card_w = 58
+    card_h = 20
+    gap_x = 3
+    gap_y = 4
+    cols = 3
+    grid_y = y0 + 20
+
+    for idx, (label, value) in enumerate(stats):
+        row, col = divmod(idx, cols)
+        x = x0 + col * (card_w + gap_x)
+        y = grid_y + row * (card_h + gap_y)
+        pdf.set_xy(x, y)
+        pdf.set_fill_color(248, 250, 252)
+        pdf.set_draw_color(226, 232, 240)
+        pdf.rect(x, y, card_w, card_h, "DF")
+        pdf.set_xy(x + 3, y + 3)
+        _pdf_set_font(pdf, base_font, has_bold, 8)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(card_w - 6, 5, _sanitize_pdf_text(label))
+        pdf.set_xy(x + 3, y + 10)
+        _pdf_set_font(pdf, base_font, has_bold, 11, bold=True)
+        pdf.set_text_color(30, 58, 138)
+        pdf.cell(card_w - 6, 7, _sanitize_pdf_text(value))
+        pdf.set_text_color(0, 0, 0)
+
+    pdf.set_y(grid_y + 2 * (card_h + gap_y) + 4)
+
+
+def _pdf_draw_unit_card(
+    pdf, base_font: str, has_bold: bool, unit: str, rec: dict,
+) -> None:
+    """단원별 대표 사진 2장 + 압축 요약 카드."""
+    score = _safe_float(rec.get("ncs_score"))
+    band = _score_band(score)
+    score_rgb = _hex_to_rgb(_score_color(score))
+    card_x = pdf.l_margin
+    card_w = pdf.w - pdf.l_margin - pdf.r_margin
+    y_start = pdf.get_y()
+
+    if y_start > 210:
+        pdf.add_page()
+        y_start = pdf.get_y()
+
+    # 카드 배경
+    pdf.set_fill_color(255, 255, 255)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.rect(card_x, y_start, card_w, 4, "F")
+
+    # 단원 헤더
+    pdf.set_xy(card_x + 4, y_start + 3)
+    _pdf_set_font(pdf, base_font, has_bold, 12, bold=True)
+    pdf.set_text_color(30, 58, 138)
+    unit_label = UNIT_ICONS.get(unit, "")
+    title = f"{unit_label} {unit}".strip() if unit_label else unit
+    pdf.cell(card_w - 70, 7, _sanitize_pdf_text(title))
+
+    pdf.set_fill_color(*score_rgb)
+    pdf.set_text_color(255, 255, 255)
+    _pdf_set_font(pdf, base_font, has_bold, 10, bold=True)
+    badge_x = card_x + card_w - 42
+    pdf.set_xy(badge_x, y_start + 3)
+    pdf.cell(38, 7, _sanitize_pdf_text(f"{score:.0f}점 {band}"), align="C", fill=True)
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.set_xy(card_x + 4, y_start + 11)
+    _pdf_set_font(pdf, base_font, has_bold, 9)
+    pdf.set_text_color(107, 114, 128)
+    meta = f"수행일 {(rec.get('submitted_at') or '')[:10]}"
+    redo = int(_safe_float(rec.get("redo_count"), 0))
+    if redo > 0:
+        meta += f"  ·  재수행 {redo}회"
+    pdf.cell(card_w - 8, 5, _sanitize_pdf_text(meta))
+    pdf.set_text_color(0, 0, 0)
+
+    content_y = y_start + 18
+    photo_w = 82
+    photo_h = 52
+    gap = 6
+    photos = _pick_representative_photos(rec, 2)
+
+    if photos:
+        for i, img_bytes in enumerate(photos[:2]):
+            px = card_x + 4 + i * (photo_w + gap)
+            try:
+                pdf.image(BytesIO(img_bytes), x=px, y=content_y, w=photo_w, h=photo_h)
+            except Exception as e:
+                logger.warning("포트폴리오 사진 삽입 실패: %s", e)
+        text_x = card_x + 4
+        text_w = card_w - 8
+        text_y = content_y + photo_h + 4
+    else:
+        pdf.set_xy(card_x + 4, content_y)
+        _pdf_set_font(pdf, base_font, has_bold, 9)
+        pdf.set_text_color(156, 163, 175)
+        pdf.cell(card_w - 8, 8, _sanitize_pdf_text("(첨부 사진 없음)"))
+        pdf.set_text_color(0, 0, 0)
+        text_x = card_x + 4
+        text_w = card_w - 8
+        text_y = content_y + 10
+
+    _pdf_set_font(pdf, base_font, has_bold, 9)
+    pdf.set_xy(text_x, text_y)
+    for line in _build_unit_summary_lines(rec):
+        if pdf.get_y() > 275:
+            break
+        _pdf_safe_multicell(pdf, f"• {line}", line_height=5.5, width=text_w)
+        pdf.ln(0.5)
+
+    card_bottom = max(pdf.get_y() + 4, text_y + 8)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(card_x, y_start, card_x, card_bottom)
+    pdf.line(card_x + card_w, y_start, card_x + card_w, card_bottom)
+    pdf.line(card_x, card_bottom, card_x + card_w, card_bottom)
+    pdf.set_y(card_bottom + 6)
+
+
 def build_comprehensive_portfolio_pdf(student_id: str, student_name: str, records: list[dict]) -> bytes:
     """학기말 포트폴리오 PDF 생성. 어떤 예외가 발생해도 빈 bytes를 반환하여 UI 충돌을 방지한다."""
     if FPDF is None:
@@ -1063,143 +1334,61 @@ def _build_portfolio_pdf_inner(student_id: str, student_name: str, records: list
 
     student_id = _sanitize_pdf_text(student_id) or "-"
     student_name = _sanitize_pdf_text(student_name) or "학생"
+    unit_records = _latest_record_per_unit(records)
+    overview = _compute_portfolio_overview(records)
 
     # ── 표지 ─────────────────────────────────────────────
     pdf.add_page()
     pdf.set_fill_color(30, 58, 138)
-    pdf.rect(0, 0, 210, 40, "F")
+    pdf.rect(0, 0, 210, 52, "F")
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font(base_font, "B" if has_bold else "", 22)
-    pdf.set_xy(0, 12)
-    pdf.cell(210, 12, _sanitize_pdf_text("나의 자동차 실습 성장 일지"), align="C")
-    pdf.set_font(base_font, size=12)
-    pdf.set_xy(0, 26)
-    pdf.cell(210, 8, _sanitize_pdf_text(f"{student_name}  ·  학번 {student_id}"), align="C")
+    _pdf_set_font(pdf, base_font, has_bold, 24, bold=True)
+    pdf.set_xy(0, 14)
+    pdf.cell(210, 12, _sanitize_pdf_text("학기말 최종 포트폴리오"), align="C")
+    _pdf_set_font(pdf, base_font, has_bold, 12)
+    pdf.set_xy(0, 30)
+    pdf.cell(210, 7, _sanitize_pdf_text("자동차 전기전자제어 · NCS 수행평가"), align="C")
+    pdf.set_xy(0, 40)
+    pdf.cell(210, 7, _sanitize_pdf_text(f"{student_name}  ·  학번 {student_id}"), align="C")
     pdf.set_text_color(0, 0, 0)
-    pdf.set_xy(15, 50)
+    pdf.set_xy(15, 62)
+    _pdf_set_font(pdf, base_font, has_bold, 10)
+    pdf.set_text_color(107, 114, 128)
+    pdf.cell(
+        0, 6,
+        _sanitize_pdf_text(f"생성일 {now_kst_display()[:10]}"),
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
 
-    # ── 요약 카드 ────────────────────────────────────────
-    pdf.set_font(base_font, size=11)
-    avg_score = (sum(_safe_float(r.get("ncs_score")) for r in records) / len(records)) if records else 0
-    fb_count = sum(1 for r in records if (r.get("teacher_feedback") or "").strip())
-    unit_count = len({(r.get("unit") or "").strip() for r in records if r.get("unit")})
-    pdf.set_fill_color(243, 244, 246)
-    pdf.set_draw_color(229, 231, 235)
-    pdf.rect(15, pdf.get_y(), 180, 22, "DF")
-    y0 = pdf.get_y()
-    pdf.set_xy(20, y0 + 3); pdf.cell(55, 7, _sanitize_pdf_text("총 실습 건수"))
-    pdf.set_xy(20, y0 + 11); pdf.set_font_size(14); pdf.cell(55, 7, f"{len(records)} 건"); pdf.set_font_size(11)
-    pdf.set_xy(80, y0 + 3); pdf.cell(55, 7, _sanitize_pdf_text("평균 성취도"))
-    pdf.set_xy(80, y0 + 11); pdf.set_font_size(14); pdf.cell(55, 7, f"{avg_score:.1f} 점"); pdf.set_font_size(11)
-    pdf.set_xy(140, y0 + 3); pdf.cell(50, 7, _sanitize_pdf_text("참여 단원 / 피드백"))
-    pdf.set_xy(140, y0 + 11); pdf.set_font_size(14); pdf.cell(50, 7, f"{unit_count}단원 · {fb_count}건"); pdf.set_font_size(11)
-    pdf.set_xy(15, y0 + 28)
+    # ── 수행평가 전반 요약 ───────────────────────────────
+    _pdf_section_title(pdf, base_font, has_bold, "수행평가 전반 요약")
+    _pdf_draw_overview_dashboard(pdf, base_font, has_bold, overview)
+    pdf.ln(2)
 
-    # ── 교사 피드백 상단 강조 ────────────────────────────
-    feedback_recs = [r for r in records if (r.get("teacher_feedback") or "").strip()]
-    if feedback_recs:
-        pdf.set_font_size(14); pdf.set_text_color(202, 138, 4)
-        pdf.set_x(15)
-        pdf.cell(0, 10, _sanitize_pdf_text("[ 선생님의 피드백 ]"), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(0, 0, 0); pdf.set_font_size(11)
-        for r in feedback_recs:
-            if pdf.get_y() > 250: pdf.add_page()
-            pdf.set_fill_color(255, 247, 230)
-            pdf.set_draw_color(250, 140, 22)
-            head = f"  {r.get('unit', '')}  ({(r.get('submitted_at') or '')[:10]})"
-            pdf.set_x(15); pdf.cell(180, 6, _sanitize_pdf_text(head), fill=True)
-            pdf.ln(6)
-            _pdf_safe_multicell(pdf, f"  {r.get('teacher_feedback', '')}", line_height=7, width=180)
-            pdf.ln(3)
-        pdf.ln(2)
+    # ── 단원별 활동 요약 ─────────────────────────────────
+    _pdf_section_title(pdf, base_font, has_bold, "단원별 활동 요약")
+    _pdf_set_font(pdf, base_font, has_bold, 9)
+    pdf.set_text_color(107, 114, 128)
+    pdf.set_x(pdf.l_margin)
+    pdf.cell(
+        0, 5,
+        _sanitize_pdf_text("각 NCS 능력단위별 최신 수행 기록 1건 · 대표 사진 2장 · 핵심 요약"),
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
 
-    # ── 단원별 성취도 그래프 ─────────────────────────────
-    if go is not None and records:
-        try:
-            unit_rows = _aggregate_unit_scores(records)
-            if unit_rows:
-                units = [u for u, _s, _n in unit_rows]
-                scores = [s for _u, s, _n in unit_rows]
-                colors = [_score_color(s) for s in scores]
-                fig = go.Figure(data=[go.Bar(
-                    x=units, y=scores, marker_color=colors,
-                    text=[f"{s:.0f}" for s in scores], textposition="outside"
-                )])
-                fig.update_layout(
-                    title="단원별 평균 성취도",
-                    yaxis=dict(range=[0, 110]),
-                    plot_bgcolor="white", paper_bgcolor="white",
-                    margin=dict(l=40, r=20, t=40, b=80),
-                )
-                png = _plotly_to_png_bytes(fig)
-                if png:
-                    if pdf.get_y() > 200: pdf.add_page()
-                    pdf.image(BytesIO(png), x=15, w=180)
-                    pdf.ln(4)
-
-            cat_avgs = _aggregate_category_scores(records)
-            if any(cat_avgs.values()):
-                labels = [lab for _ico, lab in _CATEGORY_LABELS]
-                vals = [cat_avgs.get(lab, 0.0) for lab in labels]
-                fig2 = go.Figure(data=go.Scatterpolar(
-                    r=vals + [vals[0]], theta=labels + [labels[0]],
-                    fill="toself", line_color="#1E40AF", fillcolor="rgba(59,130,246,0.35)"
-                ))
-                fig2.update_layout(
-                    title="NCS 카테고리별 평균",
-                    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                    paper_bgcolor="white", margin=dict(l=40, r=40, t=40, b=20),
-                )
-                png2 = _plotly_to_png_bytes(fig2)
-                if png2:
-                    if pdf.get_y() > 200: pdf.add_page()
-                    pdf.image(BytesIO(png2), x=30, w=150)
-                    pdf.ln(4)
-        except Exception as e:
-            logger.warning("그래프 PDF 임베드 실패(텍스트 본문은 계속 진행): %s", e)
-
-    # ── 실습 기록 상세 ────────────────────────────────────
-    pdf.add_page()
-    pdf.set_font_size(14); pdf.set_text_color(30, 58, 138)
-    pdf.set_x(15)
-    pdf.cell(0, 10, _sanitize_pdf_text("실습 기록"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_text_color(0, 0, 0); pdf.set_font_size(11)
-
-    for idx, rec in enumerate(sorted(records, key=lambda x: x.get('submitted_at', '')), 1):
-        if pdf.get_y() > 240: pdf.add_page()
-        score = _safe_float(rec.get("ncs_score"))
-        col = _score_color(score)
-        r_, g_, b_ = int(col[1:3], 16), int(col[3:5], 16), int(col[5:7], 16)
-        y = pdf.get_y()
-        pdf.set_fill_color(r_, g_, b_); pdf.rect(15, y, 4, 22, "F")
-        pdf.set_xy(22, y + 2)
-        pdf.set_font_size(13)
-        title = f"{idx}. {rec.get('unit', '')}  ({(rec.get('submitted_at') or '')[:10]})"
-        pdf.cell(0, 7, _sanitize_pdf_text(title), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font_size(10); pdf.set_text_color(107, 114, 128)
-        pdf.set_x(22)
-        pdf.cell(0, 6, _sanitize_pdf_text(f"성취도 {score:.0f}점  ·  {_score_band(score)}"),
-                 new_x="LMARGIN", new_y="NEXT")
-        pdf.set_text_color(0, 0, 0); pdf.set_font_size(11)
-        pdf.ln(2)
-
-        _pdf_safe_multicell(pdf, f"[수행 내용]\n{rec.get('symptom', '(없음)')}")
-        pdf.ln(1)
-        _pdf_safe_multicell(pdf, f"[나의 소감]\n{rec.get('reflection', '(없음)')}")
-        pdf.ln(2)
-
-        img_bytes = thumbnail_b64_to_bytes(rec.get("image_b64", ""))
-        if img_bytes:
-            try:
-                pdf.set_x(15)
-                pdf.image(BytesIO(img_bytes), w=55)
-                pdf.ln(3)
-            except Exception:
-                pass
-
-        pdf.set_draw_color(229, 231, 235)
-        pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-        pdf.ln(4)
+    if unit_records:
+        for rec in unit_records:
+            unit = (rec.get("unit") or "").strip()
+            if unit:
+                _pdf_draw_unit_card(pdf, base_font, has_bold, unit, rec)
+    else:
+        _pdf_set_font(pdf, base_font, has_bold, 10)
+        pdf.set_x(pdf.l_margin)
+        pdf.cell(0, 8, _sanitize_pdf_text("저장된 단원별 수행평가 기록이 없습니다."))
 
     return bytes(pdf.output(dest="S"))
 
@@ -2557,7 +2746,10 @@ def _render_final_portfolio_section(records: list[dict]) -> None:
     if pdf_cached:
         st.download_button(
             "PDF 다운로드", data=pdf_cached,
-            file_name=f"Final_Portfolio_{st.session_state.student_id}.pdf",
+            file_name=_portfolio_pdf_filename(
+                st.session_state.student_id,
+                st.session_state.student_display_name,
+            ),
             mime="application/pdf", use_container_width=True,
         )
 
@@ -2925,7 +3117,7 @@ def _render_teacher_final_assessment(
             if cached_pdf:
                 st.download_button(
                     "📥 PDF 다운로드", data=cached_pdf,
-                    file_name=f"Final_Portfolio_{student_id}.pdf",
+                    file_name=_portfolio_pdf_filename(student_id, student_name),
                     mime="application/pdf",
                     key=f"dl_pdf_{student_id}",
                     use_container_width=True,
