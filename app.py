@@ -1482,6 +1482,27 @@ div[data-testid="stModal"] .stButton button {
     min-width: max-content !important;
 }
 
+@media (max-width: 768px) {
+    .mission-card { padding: 12px 14px !important; }
+    .mission-card h4.mission-title { font-size: 1.2rem !important; }
+    .mission-card .body { font-size: 1rem !important; }
+    .mission-progress { font-size: 1rem !important; padding: 10px 12px !important; }
+    div[class*="st-key-open_chance_"] .stButton button,
+    div[class*="st-key-chance_yes_"] .stButton button,
+    div[class*="st-key-chance_no_"] .stButton button {
+        white-space: normal !important;
+        min-width: unset !important;
+        width: 100% !important;
+        font-size: 1rem !important;
+    }
+    div[role="dialog"] .stButton button,
+    div[data-testid="stModal"] .stButton button {
+        white-space: normal !important;
+        min-width: unset !important;
+        width: 100% !important;
+    }
+}
+
 </style>
 """
 
@@ -2074,92 +2095,215 @@ div.stButton > button[kind="primary"]:active { transform: translateY(-1px); }
             reset_diagnosis_flow()
             st.rerun()
 
+_PORTFOLIO_MENU_BASE = "📓 나의 포트폴리오"
+
+
+def _portfolio_seen_key(student_id: str, kind: str) -> str:
+    return f"portfolio_seen_{kind}_{_normalize_sid(student_id)}"
+
+
+def _get_cached_student_records(student_id: str) -> list[dict]:
+    sid = _normalize_sid(student_id)
+    if not sid:
+        return []
+    try:
+        df = shb.read_history_df()
+        if df is None or df.empty:
+            return []
+        records = shb.history_df_to_records(df)
+        return [r for r in records if _normalize_sid(r.get("student_id")) == sid]
+    except Exception as e:
+        logger.warning("학생 기록(캐시) 로드 실패: %s", e)
+        return list(st.session_state.get("my_history_records") or [])
+
+
+def _latest_feedback_timestamp(records: list[dict]) -> str:
+    latest = ""
+    for rec in records:
+        if not (rec.get("teacher_feedback") or "").strip():
+            continue
+        ts = (rec.get("teacher_feedback_updated_at") or rec.get("submitted_at") or "").strip()
+        if ts > latest:
+            latest = ts
+    return latest
+
+
+def _latest_final_assessment_timestamp(student_id: str) -> str:
+    sid = _normalize_sid(student_id)
+    if not sid:
+        return ""
+    try:
+        row = shb.get_final_assessment(sid) or {}
+    except Exception:
+        return ""
+    if not ((row.get("final_score") or "").strip() or (row.get("teacher_overall_comment") or "").strip()):
+        return ""
+    return (row.get("updated_at") or "").strip()
+
+
+def _has_unread_portfolio_updates(records: list[dict], student_id: str) -> bool:
+    sid = _normalize_sid(student_id)
+    if not sid:
+        return False
+    seen_fb = st.session_state.get(_portfolio_seen_key(sid, "feedback"), "")
+    seen_final = st.session_state.get(_portfolio_seen_key(sid, "final"), "")
+    latest_fb = _latest_feedback_timestamp(records)
+    latest_final = _latest_final_assessment_timestamp(sid)
+    if latest_fb and latest_fb > seen_fb:
+        return True
+    if latest_final and latest_final > seen_final:
+        return True
+    return False
+
+
+def _mark_portfolio_updates_seen(records: list[dict], student_id: str) -> None:
+    sid = _normalize_sid(student_id)
+    if not sid:
+        return
+    latest_fb = _latest_feedback_timestamp(records)
+    latest_final = _latest_final_assessment_timestamp(sid)
+    if latest_fb:
+        st.session_state[_portfolio_seen_key(sid, "feedback")] = latest_fb
+    if latest_final:
+        st.session_state[_portfolio_seen_key(sid, "final")] = latest_final
+
+
+def _pf_section_title(text: str) -> None:
+    st.markdown(
+        f'<div class="pf-section-title">{_esc_html(text)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _pf_section_caption(html_text: str) -> None:
+    st.markdown(f'<div class="pf-section-caption">{html_text}</div>', unsafe_allow_html=True)
+
+
 _PORTFOLIO_CSS = """
 <style>
+/* ── 포트폴리오 공통 타이포 스케일 ── */
+:root {
+    --pf-display: 34px;
+    --pf-title: 28px;
+    --pf-head: 24px;
+    --pf-body: 22px;
+    --pf-meta: 20px;
+    --pf-label: 19px;
+    --pf-stat-num: 42px;
+    --pf-stat-label: 20px;
+}
+
+.pf-section-title {
+    font-size: var(--pf-title); font-weight: 800; color: #1E3A8A;
+    margin: 10px 0 12px 0; letter-spacing: -0.3px; line-height: 1.3;
+}
+.pf-section-caption {
+    font-size: var(--pf-meta); color: #4B5563; margin: 0 0 12px 0; line-height: 1.55;
+}
+
+/* ── 사이드바 NEW 알림 ── */
+.pf-sidebar-alert {
+    background: linear-gradient(135deg,#FEF2F2 0%,#FEE2E2 100%);
+    border: 1px solid #FCA5A5; border-radius: 12px;
+    padding: 10px 12px; margin: 0 0 10px 0;
+    font-size: 18px; color: #991B1B; line-height: 1.45;
+}
+.pf-menu-new {
+    display: inline-block; margin-left: 6px;
+    background: #EF4444; color: #fff;
+    font-size: 13px; font-weight: 800;
+    padding: 2px 8px; border-radius: 999px;
+    vertical-align: middle; letter-spacing: 0.4px;
+}
+
 /* ── 헤더(히어로) ── */
 .pf-hero {
     background: linear-gradient(135deg,#1E3A8A 0%,#3B82F6 100%);
-    color:#fff; padding:24px 28px; border-radius:18px; margin-bottom:20px;
+    color:#fff; padding:26px 30px; border-radius:18px; margin-bottom:20px;
     box-shadow:0 6px 18px rgba(30,58,138,0.22);
 }
-.pf-hero h2 { margin:0; font-size:30px; font-weight:800; letter-spacing:-0.3px; }
-.pf-hero p { margin:8px 0 0 0; opacity:0.92; font-size:16px; }
+.pf-hero h2 { margin:0; font-size:var(--pf-display); font-weight:800; letter-spacing:-0.3px; line-height:1.25; }
+.pf-hero p { margin:10px 0 0 0; opacity:0.92; font-size:var(--pf-meta); line-height:1.5; }
 
 .pf-stats {
     display:grid; grid-template-columns: repeat(4, 1fr);
-    gap:14px; margin-top:20px;
+    gap:14px; margin-top:22px;
 }
 .pf-stat {
     background:rgba(255,255,255,0.18); padding:18px 16px; border-radius:14px;
     backdrop-filter:blur(4px); position:relative;
     border:1px solid rgba(255,255,255,0.25);
 }
-.pf-stat b { font-size:34px; display:block; font-weight:800; line-height:1.1; }
-.pf-stat .label { font-size:15px; opacity:0.95; margin-top:6px; display:block; }
+.pf-stat b { font-size:var(--pf-stat-num); display:block; font-weight:800; line-height:1.1; }
+.pf-stat .label { font-size:var(--pf-stat-label); opacity:0.95; margin-top:8px; display:block; line-height:1.35; }
 .pf-stat .help-mark {
     position:absolute; top:8px; right:10px;
-    width:22px; height:22px; border-radius:50%;
+    width:24px; height:24px; border-radius:50%;
     background:rgba(255,255,255,0.30); color:#fff;
-    font-size:13px; font-weight:700; line-height:22px; text-align:center;
+    font-size:14px; font-weight:700; line-height:24px; text-align:center;
     cursor:help; user-select:none;
 }
 .pf-stat .help-mark:hover { background:rgba(255,255,255,0.55); color:#1E3A8A; }
 
-/* ── 학기말 최종 수행평가 (학생 포트폴리오 최상단) ── */
+/* ── 학기말 최종 수행평가 ── */
 .pf-final-assess {
     background: linear-gradient(135deg,#312E81 0%,#4338CA 55%,#6366F1 100%);
-    color:#fff; border-radius:18px; padding:22px 26px; margin-bottom:18px;
+    color:#fff; border-radius:18px; padding:24px 28px; margin-bottom:18px;
     box-shadow:0 8px 22px rgba(67,56,202,0.28);
 }
-.pf-final-head { font-size:20px; font-weight:800; margin-bottom:10px; letter-spacing:-0.2px; }
+.pf-final-head { font-size:var(--pf-head); font-weight:800; margin-bottom:12px; letter-spacing:-0.2px; line-height:1.35; }
 .pf-final-score {
     display:inline-block; background:rgba(255,255,255,0.18);
     border:1px solid rgba(255,255,255,0.35); border-radius:12px;
-    padding:8px 16px; font-size:28px; font-weight:800; margin-bottom:12px;
+    padding:10px 18px; font-size:var(--pf-title); font-weight:800; margin-bottom:12px; line-height:1.2;
 }
 .pf-final-comment {
     background:rgba(255,255,255,0.12); border-radius:12px;
-    padding:14px 16px; line-height:1.75; font-size:18px; font-weight:500;
+    padding:16px 18px; line-height:1.75; font-size:var(--pf-body); font-weight:500;
     white-space:pre-wrap;
 }
-.pf-final-meta { margin-top:10px; font-size:13px; opacity:0.85; }
+.pf-final-meta { margin-top:12px; font-size:var(--pf-meta); opacity:0.88; line-height:1.45; }
 
 /* ── 선생님 피드백 카드 ── */
 .pf-fb-card {
     background:#FFF7E6; border-left:8px solid #FA8C16;
-    border-radius:12px; padding:16px 22px; margin:10px 0;
+    border-radius:12px; padding:18px 24px; margin:10px 0;
     box-shadow:0 1px 4px rgba(0,0,0,0.05);
 }
-.pf-fb-head { display:flex; justify-content:space-between; align-items:center;
-    color:#92400E; font-weight:700; margin-bottom:8px; font-size:18px; }
+.pf-fb-head {
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    color:#92400E; font-weight:700; margin-bottom:10px;
+    font-size:var(--pf-head); line-height:1.35;
+}
+.pf-fb-date { font-size:var(--pf-meta); font-weight:500; color:#9A6B00; white-space:nowrap; }
 .pf-fb-body {
-    color:#3F2200; line-height:1.75; font-size:19px;
+    color:#3F2200; line-height:1.75; font-size:var(--pf-body);
     white-space:pre-wrap; font-weight:500;
 }
 .pf-fb-empty {
     background:#F3F4F6; border:1px dashed #D1D5DB; color:#6B7280;
-    padding:16px; border-radius:10px; text-align:center; font-size:16px;
+    padding:18px; border-radius:10px; text-align:center;
+    font-size:var(--pf-body); line-height:1.6;
 }
 
-/* ── 단원별 진척도 그리드 (6단원) ── */
+/* ── 단원별 진척도 그리드 ── */
 .pf-units-grid {
     display:grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     gap:12px; margin:6px 0 8px 0;
 }
 .pf-unit-cell {
-    position:relative;
-    box-sizing:border-box; padding:14px 16px;
+    position:relative; box-sizing:border-box; padding:16px 18px;
     border-radius:14px; text-align:center;
-    font-weight:700; font-size:17px;
+    font-weight:700; font-size:var(--pf-head);
     box-shadow:0 1px 2px rgba(0,0,0,0.04);
-    word-break:keep-all; line-height:1.4;
+    word-break:keep-all; line-height:1.45;
 }
 .pf-unit-cell .count {
-    display:block; margin-top:6px; font-size:13px; font-weight:500; opacity:0.85;
+    display:block; margin-top:8px; font-size:var(--pf-meta); font-weight:500; opacity:0.88;
 }
 .pf-unit-cell .badge {
     position:absolute; top:8px; right:10px;
-    font-size:12px; font-weight:800; padding:3px 8px; border-radius:999px;
+    font-size:var(--pf-label); font-weight:800; padding:4px 10px; border-radius:999px;
 }
 .pf-unit-done { background:#ECFDF5; color:#065F46; border:1.5px solid #6EE7B7; }
 .pf-unit-done .badge { background:#065F46; color:#ECFDF5; }
@@ -2169,23 +2313,25 @@ _PORTFOLIO_CSS = """
 /* ── 실습 기록 카드 ── */
 .pf-record {
     border:1px solid #E5E7EB; border-radius:14px;
-    padding:14px 18px; margin-bottom:12px; background:#fff;
+    padding:16px 20px; margin-bottom:12px; background:#fff;
     box-shadow:0 1px 3px rgba(0,0,0,0.04);
 }
 .pf-rec-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.pf-rec-title { font-size:22px; font-weight:800; color:#111827; letter-spacing:-0.2px; }
-.pf-rec-date { font-size:15px; color:#4B5563; margin-top:2px; font-weight:500; }
-.pf-chip { display:inline-block; padding:4px 12px; border-radius:999px;
-    font-size:13px; font-weight:700; margin-left:4px; }
+.pf-rec-title { font-size:var(--pf-head); font-weight:800; color:#111827; letter-spacing:-0.2px; line-height:1.35; }
+.pf-rec-date { font-size:var(--pf-meta); color:#4B5563; margin-top:4px; font-weight:500; line-height:1.4; }
+.pf-chip {
+    display:inline-block; padding:5px 14px; border-radius:999px;
+    font-size:var(--pf-label); font-weight:700; margin-left:4px; line-height:1.3;
+}
 .pf-chip-fb { background:#DBEAFE; color:#1D4ED8; }
 .pf-chip-wait { background:#F3F4F6; color:#6B7280; }
 .pf-chip-chance { background:#FEF3C7; color:#92400E; }
 .pf-score {
-    display:inline-block; padding:5px 14px; border-radius:10px;
-    font-weight:800; font-size:14px; color:#fff;
+    display:inline-block; padding:6px 16px; border-radius:10px;
+    font-weight:800; font-size:var(--pf-label); color:#fff; line-height:1.3;
 }
 
-/* ── 한줄 요약: 매우 크고 눈에 띄게 ── */
+/* ── 한줄 요약 ── */
 .pf-summary {
     background:linear-gradient(135deg,#1E40AF 0%,#2563EB 60%,#3B82F6 100%);
     border-radius:14px; padding:18px 22px; margin:14px 0 12px 0;
@@ -2193,20 +2339,18 @@ _PORTFOLIO_CSS = """
 }
 .pf-summary .tag {
     display:inline-block; background:rgba(255,255,255,0.22);
-    padding:3px 10px; border-radius:999px;
-    font-size:12px; font-weight:700; letter-spacing:0.5px;
+    padding:4px 12px; border-radius:999px;
+    font-size:var(--pf-label); font-weight:700; letter-spacing:0.5px;
 }
 .pf-summary .text {
-    margin-top:8px; font-size:22px; font-weight:800; line-height:1.45;
+    margin-top:10px; font-size:var(--pf-head); font-weight:800; line-height:1.45;
     letter-spacing:-0.2px;
 }
-.pf-summary.muted {
-    background:#F3F4F6; color:#6B7280; box-shadow:none;
-}
-.pf-summary.muted .tag { background:#E5E7EB; color:#4B5563; }
-.pf-summary.muted .text { color:#6B7280; font-weight:600; }
+.pf-summary.muted { background:#F3F4F6; color:#6B7280; box-shadow:none; }
+.pf-summary.muted .tag { background:#E5E7EB; color:#4B5563; font-size:var(--pf-label); }
+.pf-summary.muted .text { color:#6B7280; font-weight:600; font-size:var(--pf-head); }
 
-/* ── 카테고리 4박스: 숫자 강조 + 통과/보완 + 한줄 코멘트 (글자 1.5배) ── */
+/* ── 카테고리 4박스 ── */
 .pf-cat-grid {
     display:grid; grid-template-columns: repeat(2, minmax(0, 1fr));
     gap:12px; margin:12px 0 8px 0;
@@ -2218,71 +2362,58 @@ _PORTFOLIO_CSS = """
     box-shadow:0 1px 2px rgba(0,0,0,0.04);
 }
 .pf-cat-num {
-    flex:0 0 auto;
-    width:56px; height:56px; border-radius:12px;
+    flex:0 0 auto; width:56px; height:56px; border-radius:12px;
     display:flex; align-items:center; justify-content:center;
-    font-size:28px; font-weight:800; color:#FFFFFF;
+    font-size:var(--pf-title); font-weight:800; color:#FFFFFF;
 }
 .pf-cat-body { flex:1 1 auto; min-width:0; }
-.pf-cat-name { font-size:21px; font-weight:800; color:#1F2937; }
+.pf-cat-name { font-size:var(--pf-head); font-weight:800; color:#1F2937; line-height:1.35; }
 .pf-cat-row {
-    display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap:wrap;
+    display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap;
 }
 .pf-cat-status {
     display:inline-block; padding:5px 14px; border-radius:999px;
-    font-size:18px; font-weight:800;
+    font-size:var(--pf-body); font-weight:800; line-height:1.3;
 }
 .pf-cat-pass { background:#ECFDF5; color:#065F46; }
 .pf-cat-warn { background:#FFFBEB; color:#92400E; }
 .pf-cat-none { background:#F3F4F6; color:#6B7280; }
 .pf-cat-desc {
-    font-size:19px; color:#374151; font-weight:500;
+    font-size:var(--pf-body); color:#374151; font-weight:500;
     line-height:1.55; flex:1 1 0; min-width:0;
 }
 .pf-cat-lines { margin-top:8px; }
 .pf-cat-line {
-    font-size:19px; color:#1F2937; line-height:1.6;
+    font-size:var(--pf-body); color:#1F2937; line-height:1.6;
     margin-top:6px; word-break:keep-all;
 }
 .pf-cat-line b {
     display:inline-block; min-width:94px; text-align:center;
-    color:#1E3A8A; font-weight:800; font-size:16px;
-    margin-right:10px; padding:3px 12px; border-radius:8px;
+    color:#1E3A8A; font-weight:800; font-size:var(--pf-label);
+    margin-right:10px; padding:4px 12px; border-radius:8px;
     background:#EFF6FF; letter-spacing:0.3px; vertical-align:middle;
 }
 .pf-cat-line.fact b { background:#E0F2FE; color:#075985; }
 .pf-cat-line.ncs  b { background:#EDE9FE; color:#5B21B6; }
 .pf-cat-line.imp  b { background:#FEF3C7; color:#92400E; }
 
-/* ── 종합 코멘트 박스 — 카테고리(흰 박스)와 명확히 구분되는 어두운 톤 ── */
+/* ── 종합 코멘트 ── */
 .pf-overall {
     background: linear-gradient(135deg,#0F172A 0%,#1E293B 50%,#334155 100%);
-    border-radius:16px;
-    border-left:8px solid #F59E0B;
-    padding:14px 22px 16px 22px;
-    margin:22px 0 10px 0;
-    color:#F8FAFC;
-    box-shadow:0 10px 24px rgba(15,23,42,0.32);
-    font-size:23px;
-    line-height:1.55;
-    white-space:pre-wrap;
-    word-break:keep-all;
+    border-radius:16px; border-left:8px solid #F59E0B;
+    padding:16px 22px 18px 22px; margin:22px 0 10px 0;
+    color:#F8FAFC; box-shadow:0 10px 24px rgba(15,23,42,0.32);
+    font-size:var(--pf-body); line-height:1.6; white-space:pre-wrap; word-break:keep-all;
 }
 .pf-overall .head {
     display:inline-block;
     background:linear-gradient(135deg,#F59E0B 0%,#FBBF24 100%);
-    color:#1F2937;
-    font-size:16px;
-    font-weight:900;
-    padding:4px 14px;
-    border-radius:999px;
-    letter-spacing:0.6px;
-    margin-bottom:8px;
-    box-shadow:0 2px 6px rgba(245,158,11,0.35);
+    color:#1F2937; font-size:var(--pf-label); font-weight:900;
+    padding:5px 14px; border-radius:999px; letter-spacing:0.6px;
+    margin-bottom:10px; box-shadow:0 2px 6px rgba(245,158,11,0.35);
     white-space:nowrap;
 }
 
-/* 카테고리 박스 좌측 강조선 색 — 통과는 초록, 보완은 주황, 미평가는 회색 */
 .pf-cat-box.pass { border-left:5px solid #10B981; }
 .pf-cat-box.warn { border-left:5px solid #F59E0B; }
 .pf-cat-box.none { border-left:5px solid #D1D5DB; }
@@ -2290,23 +2421,71 @@ _PORTFOLIO_CSS = """
 .pf-cat-box.warn .pf-cat-num { background:#F59E0B; }
 .pf-cat-box.none .pf-cat-num { background:#9CA3AF; }
 
-/* ── 작은 정보 블록(증상/소감 등) — 검은 코드블록 대체 ── */
+/* ── 정보 블록 ── */
 .pf-info {
     background:#F9FAFB; border:1px solid #E5E7EB; border-radius:10px;
-    padding:10px 14px; margin:4px 0 8px 0;
-    color:#1F2937; font-size:14px; line-height:1.65;
+    padding:12px 16px; margin:4px 0 8px 0;
+    color:#1F2937; font-size:var(--pf-body); line-height:1.65;
     white-space:pre-wrap; word-break:break-word;
 }
 .pf-info-label {
-    font-size:12px; font-weight:700; color:#6B7280;
-    letter-spacing:0.3px; margin-bottom:2px;
+    font-size:var(--pf-label); font-weight:700; color:#6B7280;
+    letter-spacing:0.3px; margin-bottom:4px; line-height:1.4;
+}
+.pf-chance-note {
+    background:#FFFBEB; border-left:5px solid #D97706; border-radius:10px;
+    padding:12px 16px; margin:8px 0; color:#78350F; font-weight:600;
+    font-size:var(--pf-body); line-height:1.55;
+}
+
+/* ── Streamlit 위젯(포트폴리오 화면) 글자 크기 보정 ── */
+section.main [data-testid="stExpander"] summary p {
+    font-size: var(--pf-meta) !important;
+    font-weight: 600 !important;
+}
+section.main [data-testid="stRadio"] label p {
+    font-size: var(--pf-label) !important;
+}
+
+/* ── 모바일(768px 이하) ── */
+@media (max-width: 768px) {
+    :root {
+        --pf-display: 28px;
+        --pf-title: 24px;
+        --pf-head: 21px;
+        --pf-body: 19px;
+        --pf-meta: 17px;
+        --pf-label: 16px;
+        --pf-stat-num: 34px;
+        --pf-stat-label: 17px;
+    }
+    .pf-hero { padding: 18px 16px !important; margin-bottom: 14px !important; }
+    .pf-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+    .pf-stat { padding: 14px 12px !important; }
+    .pf-stat .help-mark { display: none; }
+    .pf-units-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+    .pf-cat-grid { grid-template-columns: 1fr !important; }
+    .pf-rec-head { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+    .pf-rec-head > div:last-child { text-align: left !important; width: 100% !important; margin-top: 0 !important; }
+    .pf-fb-head { flex-direction: column !important; align-items: flex-start !important; gap: 4px !important; }
+    .pf-fb-date { white-space: normal !important; }
+    .pf-final-assess { padding: 18px 16px !important; }
+    .pf-final-score { display: block !important; text-align: center; width: 100%; box-sizing: border-box; }
+    .pf-record { padding: 14px 14px !important; }
+    .pf-cat-box { flex-direction: row !important; gap: 12px !important; }
+    .pf-sidebar-alert { font-size: 16px !important; padding: 10px !important; }
+}
+@media (max-width: 480px) {
+    .pf-stats { grid-template-columns: 1fr !important; }
+    .pf-units-grid { grid-template-columns: 1fr !important; }
+    .pf-unit-cell { font-size: var(--pf-body) !important; }
 }
 </style>
 """
 
 def _render_unit_progress_section(records: list[dict]) -> None:
     """6개 NCS 단원 각각 한 번이라도 수행평가를 완료했는지 한눈에 보여준다."""
-    st.markdown("### 단원별 진척도")
+    _pf_section_title("단원별 진척도")
     unit_counts: dict[str, int] = {}
     for r in records:
         u = (r.get("unit") or "").strip()
@@ -2315,7 +2494,9 @@ def _render_unit_progress_section(records: list[dict]) -> None:
 
     done = sum(1 for u in NCS_UNITS if u in unit_counts)
     total = len(NCS_UNITS)
-    st.caption(f"전체 {total}단원 중 **{done}단원** 완료 ({done * 100 // total}%)")
+    _pf_section_caption(
+        f"전체 {total}단원 중 <strong>{done}단원</strong> 완료 ({done * 100 // total}%)"
+    )
     st.progress(done / total if total else 0.0)
 
     grid = '<div class="pf-units-grid">'
@@ -2342,7 +2523,7 @@ def _render_unit_progress_section(records: list[dict]) -> None:
 
 
 def _render_teacher_feedback_section(records: list[dict]) -> None:
-    st.markdown("### 선생님의 피드백")
+    _pf_section_title("선생님의 피드백")
     feedback_recs = [r for r in records if (r.get("teacher_feedback") or "").strip()]
     if not feedback_recs:
         st.markdown(
@@ -2355,7 +2536,7 @@ def _render_teacher_feedback_section(records: list[dict]) -> None:
         key=lambda r: (r.get("teacher_feedback_updated_at") or r.get("submitted_at") or ""),
         reverse=True,
     )
-    st.caption(f"총 {len(feedback_recs)}건의 피드백이 도착했어요. (최신순)")
+    _pf_section_caption(f"총 <strong>{len(feedback_recs)}건</strong>의 피드백이 도착했어요. (최신순)")
     for r in feedback_recs:
         unit = r.get("unit", "")
         when = (r.get("teacher_feedback_updated_at") or r.get("submitted_at") or "")[:16]
@@ -2364,16 +2545,16 @@ def _render_teacher_feedback_section(records: list[dict]) -> None:
             f"""
 <div class="pf-fb-card">
   <div class="pf-fb-head">
-    <span>{unit}</span>
-    <span style="font-weight:500;font-size:14px;color:#9A6B00;">{when}</span>
+    <span>{_esc_html(unit)}</span>
+    <span class="pf-fb-date">{_esc_html(when)}</span>
   </div>
-  <div class="pf-fb-body">{fb}</div>
+  <div class="pf-fb-body">{_esc_html(fb)}</div>
 </div>""",
             unsafe_allow_html=True,
         )
 
 def _render_achievement_charts(records: list[dict]) -> None:
-    st.markdown("### 분야별 성취도")
+    _pf_section_title("분야별 성취도")
     if go is None:
         st.caption("그래프를 표시하려면 `plotly` 패키지가 필요합니다.")
         return
@@ -2688,9 +2869,8 @@ def _render_record_card(rec: dict) -> None:
                 steps_str = ", ".join(f"{n}단계" for n in chance_steps)
                 st.markdown(
                     f"""
-<div style="background:#FFFBEB;border-left:5px solid #D97706;border-radius:10px;
-            padding:10px 14px;margin:8px 0;color:#78350F;font-weight:600;font-size:14px;">
-  AI 찬스 사용 단계: <b>{steps_str}</b> · 총 {len(chance_steps)}회 (감점 적용)
+<div class="pf-chance-note">
+  AI 찬스 사용 단계: <b>{_esc_html(steps_str)}</b> · 총 {len(chance_steps)}회 (감점 적용)
 </div>""",
                     unsafe_allow_html=True,
                 )
@@ -2725,7 +2905,7 @@ def _render_record_card(rec: dict) -> None:
 
 def _render_final_portfolio_section(records: list[dict]) -> None:
     """학기말 최종 포트폴리오 다운로드 영역. 6개 단원을 모두 완료해야 활성화된다."""
-    st.markdown("### 학기말 최종 포트폴리오")
+    _pf_section_title("학기말 최종 포트폴리오")
 
     completed_units = {(r.get("unit") or "").strip() for r in records if r.get("unit")}
     required_units = list(NCS_UNITS)
@@ -2820,12 +3000,13 @@ def _render_student_final_assessment_banner() -> None:
     )
 
 
-def _render_portfolio_view():
+def _render_portfolio_view(records: Optional[list[dict]] = None):
     st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
 
-    _render_student_final_assessment_banner()
+    if records is None:
+        records = st.session_state.get("my_history_records", []) or []
 
-    records = st.session_state.get("my_history_records", []) or []
+    _render_student_final_assessment_banner()
 
     # ── 헤더 (요약 카드) ─────────────────────────────────
     if records:
@@ -2880,7 +3061,7 @@ def _render_portfolio_view():
 
     st.markdown("---")
     # ── ④ 실습 기록 카드 목록 ─────────────────────────
-    st.markdown("### 실습 기록")
+    _pf_section_title("실습 기록")
     sort_opt = st.radio(
         "정렬", ["최신순", "성취도 높은 순", "단원별"],
         horizontal=True, label_visibility="collapsed", key="pf_sort",
@@ -2899,9 +3080,33 @@ def _render_portfolio_view():
     # ── ⑤ 최종 PDF 다운로드 (6개 단원 모두 완료 시에만 활성화) ─────
     _render_final_portfolio_section(records)
 
+    sid = (st.session_state.get("student_id") or "").strip()
+    if sid:
+        _mark_portfolio_updates_seen(records, sid)
+
+
 def render_student_mode():
     st.sidebar.title("메뉴")
-    view = st.sidebar.radio("이동", ["🧑‍🏫 학습 모드", "📓 나의 포트폴리오"])
+    st.markdown(_PORTFOLIO_CSS, unsafe_allow_html=True)
+
+    sid = (st.session_state.get("student_id") or "").strip()
+    cached_records = _get_cached_student_records(sid)
+    has_portfolio_news = _has_unread_portfolio_updates(cached_records, sid)
+
+    if has_portfolio_news:
+        st.sidebar.markdown(
+            '<div class="pf-sidebar-alert">📬 새로운 <strong>피드백</strong> 또는 '
+            '<strong>최종 평가</strong>가 도착했어요!</div>',
+            unsafe_allow_html=True,
+        )
+
+    portfolio_menu_label = (
+        f"{_PORTFOLIO_MENU_BASE}  NEW"
+        if has_portfolio_news
+        else _PORTFOLIO_MENU_BASE
+    )
+    menu_options = ["🧑‍🏫 학습 모드", portfolio_menu_label]
+    view = st.sidebar.radio("이동", menu_options)
 
     api_key = st.secrets.get("GEMINI_API_KEY", "")
 
@@ -2909,7 +3114,9 @@ def render_student_mode():
         unit = st.selectbox("단원 선택", NCS_UNITS)
         _render_diagnosis_input_tab(unit, api_key)
     else:
-        _render_portfolio_view()
+        fresh_records = shb.filter_history_records_by_student(sid)
+        st.session_state["my_history_records"] = fresh_records
+        _render_portfolio_view(fresh_records)
 
 # ───────────────────────────────────────────────────────────────────────────
 # 교사 모드 (학생별 기록 보기 + 피드백 작성)
@@ -3469,6 +3676,23 @@ def render_landing() -> None:
 .mode-card-desc { font-size: 1.1rem; opacity: 0.95; line-height: 1.55; display: block; }
 
 .landing-foot { color:#94a3b8; font-size: 0.9rem; margin-top: 36px; }
+.mobile-only { display: none !important; }
+
+@media (max-width: 768px) {
+  .landing-wrap { margin: 0.5rem auto 0 auto; padding: 0 8px; }
+  .landing-title { font-size: 1.85rem !important; line-height: 1.25; }
+  .landing-sub { font-size: 1rem !important; }
+  .landing-hint { font-size: 0.95rem !important; margin: 16px 0 14px 0; }
+  .mode-cards { flex-direction: column; gap: 14px; align-items: stretch; margin-top: 16px; }
+  .mode-card {
+    flex: 1 1 auto; min-width: unset !important; max-width: 100% !important;
+    padding: 36px 20px !important; border-radius: 18px !important;
+  }
+  .mode-card-icon { font-size: 3rem !important; }
+  .mode-card-label { font-size: 1.5rem !important; }
+  .mode-card-desc { font-size: 1rem !important; }
+  .landing-foot { font-size: 0.85rem !important; margin-top: 24px; }
+}
 </style>
 <div class="landing-wrap">
   <div class="landing-hero">
@@ -3583,6 +3807,73 @@ section[data-testid="stSidebar"] small { font-size: 1.0rem !important; }
 
 /* 진행 바 두께도 비례 확대 */
 .stProgress > div > div > div { height: 18px !important; }
+
+/* ── 모바일 반응형 (768px 이하) — PC 디자인은 유지 ── */
+@media (max-width: 768px) {
+    html { -webkit-text-size-adjust: 100%; }
+
+    /* 본문 여백·가로 스크롤 방지 */
+    .block-container {
+        padding-left: 0.85rem !important;
+        padding-right: 0.85rem !important;
+        max-width: 100% !important;
+    }
+    .stApp h1 { font-size: 2rem !important; }
+    .stApp h2 { font-size: 1.65rem !important; }
+    .stApp h3 { font-size: 1.4rem !important; }
+
+    /* 사이드바 — 모바일에서 화면 폭에 맞게 */
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] > div:first-child {
+        width: min(100vw, 300px) !important;
+        min-width: unset !important;
+    }
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+        white-space: normal !important;
+    }
+
+    /* Streamlit 가로 컬럼 → 세로 스택 */
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+        gap: 0.5rem !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+    }
+
+    /* 버튼 터치 영역 */
+    .stButton button, .stDownloadButton button,
+    .stFormSubmitButton button, .stLinkButton button {
+        min-height: 48px !important;
+        white-space: normal !important;
+        line-height: 1.35 !important;
+    }
+
+    /* 평가 검토 하단 버튼 */
+    div[class*="st-key-redo_eval_btn"] .stButton button,
+    div[class*="st-key-save_eval_btn"] .stButton button {
+        height: auto !important;
+        min-height: 52px !important;
+        white-space: normal !important;
+    }
+
+    /* 입력 화면 주요 버튼 */
+    div.stButton > button[kind="primary"] {
+        font-size: 1.15rem !important;
+        padding: 14px 16px !important;
+        width: 100%;
+    }
+
+    /* 차트 영역 */
+    .js-plotly-plot, .plot-container.plotly { max-width: 100% !important; }
+
+    /* 전역 글자 — 모바일에서 살짝 줄여 한 화면에 정돈 */
+    html, body, [class*="st-emotion"], .stApp { font-size: 1.25rem !important; }
+    .stMarkdown p, .stMarkdown li,
+    [data-testid="stMarkdownContainer"] p { font-size: 1.05rem !important; }
+}
 </style>
 """,
     unsafe_allow_html=True,
