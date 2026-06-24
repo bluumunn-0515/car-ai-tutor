@@ -503,6 +503,27 @@ def upsert_final_assessment(
     force_refresh_final_df()
 
 
+def update_user_password(student_id: str, new_plain_password: str) -> None:
+    """users 시트에서 해당 학생의 비밀번호 해시를 갱신한다."""
+    sid = _normalize_sheet_student_id(student_id)
+    plain = (new_plain_password or "").strip()
+    if not sid:
+        raise ValueError("학번이 비어 있습니다.")
+    if not plain:
+        raise ValueError("비밀번호가 비어 있습니다.")
+    conn = _ensure_private_mode_for_write()
+    df = conn.read(worksheet=SHEET_USERS, ttl=0)
+    df = _normalize_df(df, USERS_COLS)
+    df["student_id"] = df["student_id"].map(_normalize_sheet_student_id)
+    mask = df["student_id"] == sid
+    if not mask.any():
+        raise RuntimeError(f"학번 {sid} 사용자를 찾을 수 없습니다.")
+    df.loc[mask, "password_hash"] = hash_student_password(sid, plain)
+    conn.update(worksheet=SHEET_USERS, data=df)
+    st.session_state.pop("_gs_users_df", None)
+    st.session_state.pop("_gs_users_ts", None)
+
+
 def maybe_upgrade_plaintext_password(student_id: str, plain_password: str, stored_hash: str) -> None:
     """시트에 평문 비밀번호가 남아 있으면 로그인 성공 후 해시로 덮어쓴다."""
     if not stored_hash or _is_sha256_hex(str(stored_hash)):

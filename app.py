@@ -129,6 +129,7 @@ GEMINI_RETRY_DELAYS_SECONDS = [2.0, 4.0]
 GEMINI_IMAGE_MAX_SIZE = (1024, 1024)
 GEMINI_IMAGE_JPEG_QUALITY = 85
 TEACHER_PASSWORD_DEFAULT = "0000"
+STUDENT_PASSWORD_DEFAULT = "1111"
 
 # ───────────────────────────────────────────────────────────────────────────
 # 유틸리티 함수
@@ -144,12 +145,172 @@ def now_kst_display() -> str:
 def _normalize_sid(student_id: Any) -> str:
     return str(student_id or "").strip()
 
+def normalize_student_name(s: str) -> str:
+    return " ".join((s or "").strip().split())
+
+def reset_teacher_session_soft() -> None:
+    st.session_state.teacher_logged_in = False
+    st.session_state.teacher_display_name = ""
+    st.session_state.pop("teacher_must_change_pw", None)
+
+def _ensure_teacher_password_session() -> None:
+    if "teacher_password" not in st.session_state:
+        st.session_state.teacher_password = TEACHER_PASSWORD_DEFAULT
+
 def reset_student_session_soft() -> None:
     st.session_state.student_logged_in = False
     st.session_state.student_id = ""
     st.session_state.student_display_name = ""
     st.session_state["my_history_records"] = None
     reset_diagnosis_flow()
+
+def _student_has_default_password(student_id: str) -> bool:
+    try:
+        row = shb.get_user_row(student_id)
+    except Exception:
+        return False
+    if not row:
+        return False
+    return shb.verify_student_password(
+        student_id,
+        STUDENT_PASSWORD_DEFAULT,
+        row.get("password_hash") or "",
+    )
+
+def complete_student_login(student_no: str, name: str) -> None:
+    sid_norm = _normalize_sid(student_no)
+    st.session_state.student_logged_in = True
+    st.session_state.student_id = sid_norm
+    st.session_state.student_display_name = name
+    try:
+        shb.invalidate_all_sheet_caches()
+    except Exception:
+        pass
+    try:
+        my_records = shb.filter_history_records_by_student(sid_norm)
+    except Exception:
+        my_records = []
+    st.session_state["my_history_records"] = my_records
+    st.rerun()
+
+def render_student_login() -> None:
+    st.markdown("### 🧑‍🎓 학생 로그인")
+    st.info(
+        f"**처음 접속하는 학생**은 비밀번호 **`{STUDENT_PASSWORD_DEFAULT}`** 을 입력하세요. "
+        "로그인 후 **본인만 아는 비밀번호로 반드시 변경·저장**해 주세요."
+    )
+    st.caption(
+        "학생 계정은 Google Sheets `users` 탭에 저장되며, 비밀번호는 해시로만 보관됩니다."
+    )
+    if not shb.gsheets_available():
+        st.warning("Google Sheets 연동이 준비되지 않았습니다. 담당 선생님께 문의해 주세요.")
+        return
+
+    with st.form("student_login_form"):
+        sid_in = st.text_input("학번", placeholder="예: 20250101")
+        name_in = st.text_input("이름", placeholder="예: 홍길동")
+        pw_in = st.text_input(
+            "비밀번호",
+            type="password",
+            help=f"최초 접속: {STUDENT_PASSWORD_DEFAULT}",
+        )
+        submitted = st.form_submit_button("로그인", type="primary")
+
+    if not submitted:
+        return
+
+    raw_sid = (sid_in or "").strip()
+    nm = normalize_student_name(name_in or "")
+    pw = (pw_in or "").strip()
+
+    if not nm:
+        st.error("이름을 입력해 주세요.")
+        return
+    if not raw_sid:
+        st.error("학번을 입력해 주세요.")
+        return
+    if not raw_sid.isdigit():
+        st.error("학번은 숫자만 입력할 수 있습니다.")
+        return
+    if not pw:
+        st.error("비밀번호를 입력해 주세요.")
+        return
+
+    sid = raw_sid
+    try:
+        shb.force_refresh_users()
+        row = shb.get_user_row(sid)
+    except Exception as exc:
+        st.error(f"시트를 읽는 중 오류가 발생했습니다: {exc}")
+        return
+
+    if row is None:
+        if pw != STUDENT_PASSWORD_DEFAULT:
+            st.error(
+                f"등록되지 않은 학번입니다. 처음 접속 시 비밀번호는 **{STUDENT_PASSWORD_DEFAULT}** 입니다."
+            )
+            return
+        try:
+            shb.append_user_row(sid, nm, STUDENT_PASSWORD_DEFAULT)
+        except Exception as exc:
+            st.error(f"계정 등록 실패: {exc}")
+            return
+        complete_student_login(sid, nm)
+        return
+
+    stored_name = normalize_student_name(row.get("name", ""))
+    display_name = stored_name or nm
+    if stored_name and stored_name != nm:
+        st.warning("입력하신 이름과 시트 등록 이름이 다릅니다. 시트에 등록된 이름으로 표시됩니다.")
+
+    if not shb.verify_student_password(sid, pw, row.get("password_hash") or ""):
+        st.error("비밀번호가 올바르지 않습니다.")
+        return
+
+    try:
+        shb.maybe_upgrade_plaintext_password(sid, pw, row.get("password_hash") or "")
+    except Exception:
+        pass
+
+    complete_student_login(sid, display_name)
+
+def render_student_password_change(*, required: bool = False) -> None:
+    sid = (st.session_state.get("student_id") or "").strip()
+    name = (st.session_state.get("student_display_name") or "").strip()
+    if required:
+        st.warning(
+            f"**{name}** 학생, 보안을 위해 기본 비밀번호(`{STUDENT_PASSWORD_DEFAULT}`)를 "
+            "**새 비밀번호로 변경·저장**해야 학습을 시작할 수 있습니다."
+        )
+    else:
+        st.markdown("#### 🔒 비밀번호 변경")
+
+    with st.form("student_pw_change_form"):
+        pw1 = st.text_input("새 비밀번호", type="password", key="stu_pw_new1")
+        pw2 = st.text_input("새 비밀번호 확인", type="password", key="stu_pw_new2")
+        save = st.form_submit_button("비밀번호 저장", type="primary")
+
+    if save:
+        new_pw = (pw1 or "").strip()
+        if not new_pw:
+            st.error("새 비밀번호를 입력해 주세요.")
+        elif new_pw != (pw2 or "").strip():
+            st.error("새 비밀번호가 서로 일치하지 않습니다.")
+        elif new_pw == STUDENT_PASSWORD_DEFAULT:
+            st.error(
+                f"기본 비밀번호({STUDENT_PASSWORD_DEFAULT})는 사용할 수 없습니다. "
+                "다른 비밀번호를 설정해 주세요."
+            )
+        else:
+            try:
+                shb.update_user_password(sid, new_pw)
+                st.success("비밀번호가 저장되었습니다. 잠시 후 학습 화면으로 이동합니다.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"저장 실패: {exc}")
+
+    if required:
+        st.stop()
 
 def reset_diagnosis_flow() -> None:
     st.session_state.diag_step = "input"
@@ -3121,14 +3282,17 @@ def render_student_mode():
 # ───────────────────────────────────────────────────────────────────────────
 # 교사 모드 (학생별 기록 보기 + 피드백 작성)
 # ───────────────────────────────────────────────────────────────────────────
-def _get_teacher_password() -> str:
-    try:
-        return str(st.secrets.get("TEACHER_PASSWORD") or TEACHER_PASSWORD_DEFAULT)
-    except Exception:
-        return TEACHER_PASSWORD_DEFAULT
-
 def render_teacher_login() -> None:
+    _ensure_teacher_password_session()
     st.markdown("### 🧑‍🏫 교사 로그인")
+    st.info(
+        f"**최초 로그인** 비밀번호는 **`{TEACHER_PASSWORD_DEFAULT}`** 입니다. "
+        "로그인 후 **본인 비밀번호로 반드시 변경·저장**해 주세요."
+    )
+    st.caption(
+        "변경한 비밀번호는 이 브라우저 세션에 저장되며, "
+        "같은 세션에서 다음 로그인부터 적용됩니다."
+    )
     with st.form("teacher_login_form"):
         name = st.text_input(
             "이름",
@@ -3137,21 +3301,55 @@ def render_teacher_login() -> None:
             help="대시보드 상단에 표시될 선생님 성함을 입력해 주세요.",
         )
         pw = st.text_input(
-            "교사 비밀번호", type="password",
+            "교사 비밀번호",
+            type="password",
             key="teacher_login_pw",
-            help="기본값은 0000이며, secrets의 TEACHER_PASSWORD로 변경 가능합니다.",
+            help=f"최초 로그인: {TEACHER_PASSWORD_DEFAULT}",
         )
         ok = st.form_submit_button("로그인", type="primary")
     if ok:
         if not (name or "").strip():
             st.error("이름을 입력해 주세요.")
             return
-        if pw == _get_teacher_password():
+        if pw == st.session_state.teacher_password:
             st.session_state["teacher_logged_in"] = True
             st.session_state["teacher_display_name"] = name.strip()
+            st.session_state["teacher_must_change_pw"] = pw == TEACHER_PASSWORD_DEFAULT
             st.rerun()
         else:
             st.error("비밀번호가 올바르지 않습니다.")
+
+def render_teacher_password_change(*, required: bool = False) -> None:
+    _ensure_teacher_password_session()
+    if required:
+        st.warning(
+            f"보안을 위해 기본 비밀번호(`{TEACHER_PASSWORD_DEFAULT}`)를 "
+            "**새 비밀번호로 변경·저장**해야 대시보드를 이용할 수 있습니다."
+        )
+    else:
+        st.markdown("#### 🔒 교사 비밀번호 변경")
+    st.caption("저장 후 다음 로그인부터 새 비밀번호가 적용됩니다.")
+    with st.form("teacher_pw_change_form"):
+        new_pw = st.text_input("새 비밀번호", type="password", key="teacher_pw_new")
+        new_pw2 = st.text_input("새 비밀번호 확인", type="password", key="teacher_pw_new2")
+        change_submitted = st.form_submit_button("비밀번호 저장", type="primary")
+    if change_submitted:
+        if not (new_pw or "").strip():
+            st.error("새 비밀번호를 입력해 주세요.")
+        elif new_pw != new_pw2:
+            st.error("새 비밀번호가 서로 일치하지 않습니다.")
+        elif new_pw.strip() == TEACHER_PASSWORD_DEFAULT:
+            st.error(
+                f"기본 비밀번호({TEACHER_PASSWORD_DEFAULT})는 사용할 수 없습니다. "
+                "다른 비밀번호를 설정해 주세요."
+            )
+        else:
+            st.session_state.teacher_password = new_pw.strip()
+            st.session_state["teacher_must_change_pw"] = False
+            st.success("비밀번호가 변경되었습니다.")
+            st.rerun()
+    if required:
+        st.stop()
 
 def _render_teacher_record_detail(rec: dict, student_name: str) -> None:
     """교사 모드에서 학생 한 건의 수행평가 결과를 5개 섹션으로 명확하게 보여준다.
@@ -3543,6 +3741,9 @@ def _render_teacher_final_assessment(
 
 
 def render_teacher_mode() -> None:
+    if st.session_state.get("teacher_must_change_pw"):
+        render_teacher_password_change(required=True)
+
     teacher_name = (st.session_state.get("teacher_display_name") or "").strip()
     header_suffix = f" — {teacher_name} 선생님" if teacher_name else ""
     st.header(f"🧑‍🏫 교사 대시보드{header_suffix}")
@@ -3888,6 +4089,7 @@ if "student_logged_in" not in st.session_state:
     st.session_state["student_logged_in"] = False
 if "teacher_logged_in" not in st.session_state:
     st.session_state["teacher_logged_in"] = False
+_ensure_teacher_password_session()
 
 # 랜딩 카드 클릭(?role=teacher / ?role=student) → 세션에 반영 후 쿼리 정리
 try:
@@ -3914,10 +4116,16 @@ with st.sidebar:
     st.markdown(f"### {role_label} 모드")
     if st.button("🔄 역할 다시 선택", use_container_width=True):
         st.session_state["app_role"] = None
-        st.session_state["teacher_logged_in"] = False
-        st.session_state["teacher_display_name"] = ""
+        reset_teacher_session_soft()
+        st.session_state.teacher_password = TEACHER_PASSWORD_DEFAULT
         reset_student_session_soft()
         st.rerun()
+    if (
+        st.session_state["app_role"] == "teacher"
+        and st.session_state.get("teacher_logged_in")
+        and not st.session_state.get("teacher_must_change_pw")
+    ):
+        render_teacher_password_change(required=False)
     st.markdown("---")
 
 # ── 역할에 따른 화면 분기 ─────────────────────────────
@@ -3928,16 +4136,8 @@ if st.session_state["app_role"] == "teacher":
         render_teacher_mode()
 else:
     if not st.session_state.get("student_logged_in"):
-        st.markdown("### 🧑‍🎓 학생 로그인")
-        with st.form("login"):
-            sid = st.text_input("학번")
-            name = st.text_input("이름")
-            pw = st.text_input("비밀번호", type="password")
-            if st.form_submit_button("로그인", type="primary"):
-                st.session_state.student_id = sid
-                st.session_state.student_display_name = name
-                st.session_state.student_logged_in = True
-                st.session_state["my_history_records"] = shb.filter_history_records_by_student(sid)
-                st.rerun()
+        render_student_login()
+    elif _student_has_default_password(st.session_state.get("student_id") or ""):
+        render_student_password_change(required=True)
     else:
         render_student_mode()

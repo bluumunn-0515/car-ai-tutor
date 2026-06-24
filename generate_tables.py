@@ -19,6 +19,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 OUT_DIR = Path(__file__).parent / "tables"
+DOWNLOAD_DIR = OUT_DIR / "download"
 KO_FONT = "맑은 고딕"
 EN_FONT = "Times New Roman"
 BODY_SIZE = 11
@@ -354,7 +355,78 @@ def _wrap_text(text: str, max_chars: int) -> str:
     return "\n".join(lines)
 
 
+def export_rubric_image(spec: dict, path: Path):
+    """표 4 NCS 루브릭 — 연구계획서 삽입용 고해상도 PNG."""
+    plt.rcParams.update({
+        "font.family": "Malgun Gothic",
+        "axes.unicode_minus": False,
+    })
+
+    headers = spec["headers"]
+    rows = spec["rows"]
+    n_cols = len(headers)
+
+    fig, ax = plt.subplots(figsize=(16, 7.4))
+    ax.axis("off")
+    fig.suptitle(
+        "<표 5> 본 프로젝트의 NCS 능력단위별 평가 루브릭",
+        fontsize=15,
+        fontweight="bold",
+        y=0.98,
+        color="#1A237E",
+    )
+
+    cell_text = [[str(c) for c in row] for row in rows]
+    col_labels = list(headers)
+
+    col_widths = [0.26, 0.185, 0.185, 0.185, 0.185]
+    tbl = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        loc="center",
+        cellLoc="center",
+        colWidths=col_widths,
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(12)
+    tbl.scale(1.0, 2.35)
+
+    header_fc = "#2E5090"
+    header_tc = "#FFFFFF"
+    row_fc = ["#FFFFFF", "#F7F9FC"]
+    unit_fc = ["#EEF2F7", "#E8EEF5"]
+    cat_header_fc = ["#D5E8D4", "#BBDEFB", "#FFE0B2", "#FFCDD2"]
+
+    for (row, col), cell in tbl.get_celld().items():
+        cell.set_edgecolor("#B0BEC5")
+        cell.set_linewidth(1.2)
+        cell.PAD = 0.14
+        if row == 0:
+            if col == 0:
+                cell.set_facecolor(header_fc)
+            else:
+                cell.set_facecolor(cat_header_fc[col - 1])
+            cell.set_text_props(fontweight="bold", color=header_fc if col == 0 else "#263238", ha="center")
+            if col == 0:
+                cell.get_text().set_color(header_tc)
+        else:
+            data_row = row - 1
+            if col == 0:
+                cell.set_facecolor(unit_fc[data_row % 2])
+                cell.set_text_props(fontweight="bold", ha="center", va="center", color="#1A237E")
+            else:
+                cell.set_facecolor(row_fc[data_row % 2])
+                cell.set_text_props(ha="center", va="center", color="#212121")
+
+    fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white", pad_inches=0.25)
+    plt.close(fig)
+
+
 def export_jpg(spec: dict, path: Path):
+    if spec["num"] == 4:
+        export_rubric_image(spec, path.with_suffix(".png"))
+        return
+
     plt.rcParams.update({
         "font.family": "Malgun Gothic",
         "axes.unicode_minus": False,
@@ -420,9 +492,15 @@ def export_jpg(spec: dict, path: Path):
 
 def main():
     OUT_DIR.mkdir(exist_ok=True)
-    print(f"Output → {OUT_DIR}\n")
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    print(f"Output → {OUT_DIR}")
+    print(f"Download → {DOWNLOAD_DIR}\n")
 
-    # 개별 DOCX + JPG
+    download_names = {
+        4: "표_05_NCS_능력단위별_평가_루브릭",  # 연구계획서 HWP 표 번호
+    }
+
+    # 개별 DOCX + JPG/PNG
     for spec in TABLES:
         name = slug(spec["num"], spec["title"])
         docx_path = OUT_DIR / f"{name}.docx"
@@ -430,7 +508,15 @@ def main():
         export_docx(spec, docx_path)
         export_jpg(spec, jpg_path)
         print(f"  [OK] {docx_path.name}")
-        print(f"  [OK] {jpg_path.name}")
+        if spec["num"] == 4:
+            png_path = OUT_DIR / f"{name}.png"
+            print(f"  [OK] {png_path.name}")
+        else:
+            print(f"  [OK] {jpg_path.name}")
+        if spec["num"] in download_names:
+            dl_png = DOWNLOAD_DIR / f"{download_names[spec['num']]}.png"
+            export_rubric_image(spec, dl_png)
+            print(f"  [OK] download/{dl_png.name}")
 
     # 통합 DOCX
     combined = setup_doc()
