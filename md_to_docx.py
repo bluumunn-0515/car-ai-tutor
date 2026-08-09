@@ -22,9 +22,9 @@ from docx.oxml import OxmlElement
 
 
 # ----- 설정 -----
-SRC = Path(r"C:\Users\user\Documents\car-diagnostic-app\연구계획서_수정본_v2.md")
-DST = Path(r"C:\Users\user\Documents\car-diagnostic-app\연구계획서_수정본_v2.docx")
-FIGURES_DIR = Path(r"C:\Users\user\Documents\car-diagnostic-app\figures")
+SRC = Path(__file__).resolve().parent / "연구계획서_수정본_v3.md"
+DST = Path(__file__).resolve().parent / "연구계획서_수정본_v3.docx"
+FIGURES_DIR = Path(__file__).resolve().parent / "figures"
 
 # 앱 실제 캡처 권장 ([그림 12]~[그림 22])
 APP_SCREENSHOT_FIGS = set(range(12, 23))
