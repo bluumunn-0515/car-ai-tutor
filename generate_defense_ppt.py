@@ -27,7 +27,7 @@ TEXT_DARK = RGBColor(0x2D, 0x37, 0x48)
 TEXT_MUTED = RGBColor(0x71, 0x85, 0x94)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
-FONT = "Malgun Gothic"
+FONT = "맑은 고딕"
 FOOTER_TEXT = "\ubb38\ud604\ucca0 | \uc0dd\uc131\ud615 AI \uc790\ub3d9\ucc28 \uace0\uc7a5\uc9c4\ub2e8 \ud559\uc2b5\uc9c0\uc6d0 \uc571"
 SLIDE_W = Inches(13.333)
 SLIDE_H = Inches(7.5)
@@ -211,9 +211,16 @@ def _content_slide(prs: Presentation, spec: dict, page: int):
     _apply_bg(slide)
     _add_top_bar(slide, spec["title"])
     img = spec.get("image")
-    if img:
+    layout = spec.get("layout", "default")
+    if img and layout != "image_only":
         _add_bullets(slide, spec["bullets"], width=6.1, size=16)
         _add_image(slide, img, 6.65, 1.05, 6.1)
+    elif img and layout == "image_only":
+        cap = slide.shapes.add_textbox(Inches(0.55), Inches(0.72), Inches(12), Inches(0.4))
+        rc = cap.text_frame.paragraphs[0].add_run()
+        rc.text = " / ".join(spec.get("bullets", [])[:2]) if spec.get("bullets") else ""
+        _set_font(rc, 14, color=TEXT_MUTED)
+        _add_image(slide, img, 1.2, 1.15, 10.9)
     else:
         _add_bullets(slide, spec["bullets"])
     _add_footer(slide, page)
@@ -247,8 +254,15 @@ def build_presentation() -> Presentation:
       \"실습 시간·인력 제약으로 '과정 피드백'이 병목\",
       \"학습자는 막혔을 때 다음 행동을 정하기 어려움\",
       \"본 연구의 출발점: 병목 완화 + 학습 주체성 유지\"
+    ]
+  },
+  {
+    \"title\": \"피드백 병목 개념도\",
+    \"bullets\": [
+      \"교사 1명 · 학생 다수 · 단계별 피드백 요구\"
     ],
-    \"image\": \"figures/fig_01.png\"
+    \"image\": \"figures/fig_01.png\",
+    \"layout\": \"image_only\"
   },
   {
     \"title\": \"생성형 AI — 기회와 주의\",
